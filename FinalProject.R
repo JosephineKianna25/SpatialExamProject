@@ -22,7 +22,8 @@ library(rnaturalearthdata)
 
 aarhus <- st_sfc(st_point(c(10.2039, 56.1629)), crs = 4326)
 
-# Define bounding box (from Denmark down to near countries in Europe)
+random_variabel_tjek <- hey
+# For at tjekke om jeg kan pushe
 
 bbox <- c(xmin = 5, ymin = 48, xmax = 15, ymax = 56)
 
