@@ -1,3 +1,80 @@
-Her laver vi bounding box
+# Her laver vi bounding box
 
-variabel <- variabel
+# Script 1: Simple Buffer 2000 km South of Aarhus
+
+# Install packages
+install.packages(c("sf", "ggplot", "rnaturalearth", "rnaturalearthdata", "osmdata", "dplyr"))
+
+# Load required libraries
+library(sf)
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(osmdata)
+library(dplyr)
+
+# Set CRS
+
+crs_wgs <- 4326
+crs_proj <- 3857  # Web Mercator for distance calculation
+
+# Aarhus coordinates
+
+aarhus <- st_sfc(st_point(c(10.2039, 56.1629)), crs = crs_wgs)
+aarhus_proj <- st_transform(aarhus, crs_proj)
+aarhus_coords <- st_coordinates(aarhus_proj)
+
+# Create 2000 km southward buffer
+
+buffer_width <- 2500000  # 1000 km east-west
+buffer_height <- 2500000  # 2000 km south
+
+xmin <- aarhus_coords[1] - buffer_width / 2
+xmax <- aarhus_coords[1] + buffer_width / 2
+ymin <- aarhus_coords[2] - buffer_height
+ymax <- aarhus_coords[2]
+
+buffer_rect <- st_polygon(list(rbind(
+  c(xmin, ymin),
+  c(xmin, ymax),
+  c(xmax, ymax),
+  c(xmax, ymin),
+  c(xmin, ymin)
+))) %>%
+  st_sfc(crs = crs_proj)
+
+# Load large cities from OSM (within a wide bounding box)
+
+bbox <- c(xmin = 0, ymin = 40, xmax = 25, ymax = 60)
+cities_osm <- opq(bbox = bbox, timeout = 120) %>%
+  add_osm_feature(key = "place", value = "city") %>%
+  osmdata_sf()
+
+cities <- cities_osm$osm_points %>%
+  dplyr::select(name, population, geometry) %>%
+  filter(!is.na(population) & population > 750000) %>%
+  st_transform(crs_proj)
+
+# Get cities within the buffer
+
+cities_in_buffer <- cities[st_intersects(cities, buffer_rect, sparse = FALSE), ]
+
+# Load countries and crop
+
+countries <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  st_transform(crs_proj)
+countries_clip <- st_intersection(countries, buffer_rect)
+
+# Plot
+
+ggplot() +
+  geom_sf(data = countries_clip, fill = "antiquewhite") +
+  geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
+  geom_sf(data = cities_in_buffer, aes(color = name), size = 2.5) +
+  geom_sf(data = aarhus_proj, color = "red", size = 4) +
+  labs(title = "Cities Within 2000 km Buffer South of Aarhus",
+       subtitle = "Based on Straight-Line Distance",
+       color = "City") +
+  theme_minimal()
+
+
