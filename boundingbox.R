@@ -3,7 +3,7 @@
 # Script 1: Simple Buffer 2000 km South of Aarhus
 
 # Install packages
-install.packages(c("sf", "ggplot", "rnaturalearth", "rnaturalearthdata", "osmdata", "dplyr"))
+install.packages(c("sf", "ggplot", "rnaturalearth", "rnaturalearthdata", "osmdata", "dplyr", "ggrepel"))
 
 # Load required libraries
 library(sf)
@@ -12,6 +12,8 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 library(osmdata)
 library(dplyr)
+library(ggrepel)
+library(viridis)
 
 # Set CRS
 
@@ -26,8 +28,8 @@ aarhus_coords <- st_coordinates(aarhus_proj)
 
 # Create 2000 km southward buffer
 
-buffer_width <- 2500000  # 1000 km east-west
-buffer_height <- 2500000  # 2000 km south
+buffer_width <- 2000000  # 2000 km east-west
+buffer_height <- 2000000  # 2000 km south
 
 xmin <- aarhus_coords[1] - buffer_width / 2
 xmax <- aarhus_coords[1] + buffer_width / 2
@@ -52,7 +54,9 @@ cities_osm <- opq(bbox = bbox, timeout = 120) %>%
 
 cities <- cities_osm$osm_points %>%
   dplyr::select(name, population, geometry) %>%
-  filter(!is.na(population) & population > 750000) %>%
+  filter(!is.na(population)) %>%
+  mutate(population = as.numeric(population)) %>%
+  filter(population > 500000) %>%
   st_transform(crs_proj)
 
 # Get cities within the buffer
@@ -70,11 +74,18 @@ countries_clip <- st_intersection(countries, buffer_rect)
 ggplot() +
   geom_sf(data = countries_clip, fill = "antiquewhite") +
   geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
-  geom_sf(data = cities_in_buffer, aes(color = name), size = 2.5) +
+  geom_sf(data = cities_in_buffer, color = "darkgreen", size = 3) +
+  geom_text_repel(
+    data = cities_in_buffer,
+    aes(label = name, geometry = geometry),
+    stat = "sf_coordinates",
+    size = 3,
+    max.overlaps = 15
+  ) +
   geom_sf(data = aarhus_proj, color = "red", size = 4) +
-  labs(title = "Cities Within 2000 km Buffer South of Aarhus",
-       subtitle = "Based on Straight-Line Distance",
-       color = "City") +
+  labs(
+    title = "Cities Within 2000 km Buffer South of Aarhus",
+  ) +
   theme_minimal()
 
 
