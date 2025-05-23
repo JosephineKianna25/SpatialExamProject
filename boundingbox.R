@@ -89,3 +89,45 @@ ggplot() +
   theme_minimal()
 
 
+# Choose cities
+highlighted_cities <- c("Lyon", "Torino", "Zagreb", "Budapest")
+
+# 2. Filter chosen cities
+cities_highlight <- cities_in_buffer %>%
+  filter(name %in% highlighted_cities)
+
+# Create buffer circles og 50 km radius = 50000 meters
+highlight_buffers <- st_buffer(cities_highlight, dist = 50000)
+
+# Add to plot 
+ggplot() +
+  geom_sf(data = countries_clip, fill = "antiquewhite") +
+  geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
+  geom_sf(data = highlight_buffers, fill = NA, color = "black", size = 5, linetype = "longdash") +
+  geom_sf(data = cities_in_buffer, color = "darkgreen", size = 3) +
+  geom_text_repel(
+    data = cities_in_buffer,
+    aes(label = name, geometry = geometry),
+    stat = "sf_coordinates",
+    size = 3,
+    max.overlaps = 15
+  ) +
+  geom_sf(data = aarhus_proj, color = "red", size = 4) +
+  labs(
+    title = "Cities Within 2000 km Buffer South of Aarhus"
+  ) +
+  theme_minimal()
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+
+
+
