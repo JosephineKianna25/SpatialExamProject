@@ -1,6 +1,6 @@
 
 # Install packages
-install.packages(c("sf", "osrm", "sfnetworks", "tidygraph", "dplyr", "ggplot2", "rnaturalearth", "rnaturalearthdata"))
+install.packages(c("sf", "osrm", "ggplot2", "rnaturalearth", "rnaturalearthdata"))
 
 # Install libraries
 library(osrm)
@@ -49,7 +49,7 @@ routes_all <- do.call(rbind, routes)
 points_all <- rbind(from, destinations)
 
 # List of countries in the road network
-country_names <- c("Denmark", "France", "Italy", "Croatia", "Hungary", "Austria", "Germany", "Switzerland", "Slovenia", "Czechia")
+country_names <- c("Denmark", "France", "Italy", "Croatia", "Hungary", "Austria", "Germany", "Switzerland", "Slovenia", "Czechia", "Slovakia")
 
 # Load all countries from Natural Earth
 all_countries <- ne_countries(scale = "medium", returnclass = "sf")
