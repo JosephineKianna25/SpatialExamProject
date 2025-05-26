@@ -63,31 +63,19 @@ cities <- cities_osm$osm_points %>%
 
 cities_in_buffer <- cities[st_intersects(cities, buffer_rect, sparse = FALSE), ]
 
+# Compute distance from Aarhus to every city in buffer, in kilometers
+cities_in_buffer$distance_km <- as.numeric(st_distance(aarhus_proj, cities_in_buffer)) / 1000
+cities_in_buffer$label <- paste0(
+  cities_in_buffer$name,
+  "\n",
+  round(cities_in_buffer$distance_km, 0), " km"
+)
+
 # Load countries and crop
 
 countries <- ne_countries(scale = "medium", returnclass = "sf") %>%
   st_transform(crs_proj)
 countries_clip <- st_intersection(countries, buffer_rect)
-
-# Plot
-
-ggplot() +
-  geom_sf(data = countries_clip, fill = "antiquewhite") +
-  geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
-  geom_sf(data = cities_in_buffer, color = "darkgreen", size = 3) +
-  geom_text_repel(
-    data = cities_in_buffer,
-    aes(label = name, geometry = geometry),
-    stat = "sf_coordinates",
-    size = 3,
-    max.overlaps = 15
-  ) +
-  geom_sf(data = aarhus_proj, color = "red", size = 4) +
-  labs(
-    title = "Cities Within 2000 km Buffer South of Aarhus",
-  ) +
-  theme_minimal()
-
 
 # Choose cities
 highlighted_cities <- c("Lyon", "Torino", "Zagreb", "Budapest")
@@ -97,37 +85,39 @@ cities_highlight <- cities_in_buffer %>%
   filter(name %in% highlighted_cities)
 
 # Create buffer circles og 50 km radius = 50000 meters
-highlight_buffers <- st_buffer(cities_highlight, dist = 50000)
+ highlight_buffers <- st_buffer(cities_highlight, dist = 50000)
 
-# Add to plot 
-ggplot() +
-  geom_sf(data = countries_clip, fill = "antiquewhite") +
-  geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
-  geom_sf(data = highlight_buffers, fill = NA, color = "black", size = 5, linetype = "longdash") +
-  geom_sf(data = cities_in_buffer, color = "darkgreen", size = 3) +
-  geom_text_repel(
-    data = cities_in_buffer,
-    aes(label = name, geometry = geometry),
-    stat = "sf_coordinates",
-    size = 3,
-    max.overlaps = 15
-  ) +
-  geom_sf(data = aarhus_proj, color = "red", size = 4) +
-  labs(
-    title = "Cities Within 2000 km Buffer South of Aarhus"
-  ) +
-  theme_minimal()
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-
-
+ # Prepare a data frame with coordinates for labels
+ cities_label_df <- cities_in_buffer %>%
+   st_drop_geometry() %>%
+   mutate(
+     X = st_coordinates(cities_in_buffer)[,1],
+     Y = st_coordinates(cities_in_buffer)[,2]
+   )
+ 
+ ggplot() +
+   # Countries as background
+   geom_sf(data = countries_clip, fill = "antiquewhite") +
+   # Big buffer rectangle
+   geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
+   # Highlighted city buffers
+   geom_sf(data = highlight_buffers, fill = NA, color = "black", size = 2, linetype = "longdash") +
+   # All city points
+   geom_sf(data = cities_in_buffer, color = "darkgreen", size = 3) +
+   # Labels for all cities (with distances)
+   geom_text_repel(
+     data = cities_label_df,
+     aes(x = X, y = Y, label = label),
+     size = 3,
+     max.overlaps = 15
+   ) +
+   # Optionally: bigger points for highlighted cities
+   geom_sf(data = cities_highlight, color = "red", size = 3) +
+   # Aarhus
+   geom_sf(data = aarhus_proj, color = "red", size = 4) +
+   labs(
+     title = "Cities Within 2000 km Buffer South of Aarhus"
+   ) +
+   theme_minimal()
+ 
 
