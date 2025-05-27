@@ -109,6 +109,8 @@ cities_highlight <- cities_in_buffer %>%
      data = cities_label_df,
      aes(x = X, y = Y, label = label),
      size = 3,
+     family = "Times New Roman",
+     fontface = "bold",
      max.overlaps = 15
    ) +
    # Optionally: bigger points for highlighted cities
