@@ -174,28 +174,12 @@ for (i in seq_along(routes_list)) {
     lat <- coords[2]
     small_bbox <- c(lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05)
     
-    # Craft advanced Overpass query
-    overpass_query <- paste0(
-      '[out:json][timeout:300];',
-      '(',
-      'node["amenity"~"cafe|restaurant|fast_food|toilets"](', 
-      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
-      'way["amenity"~"cafe|restaurant|fast_food|toilets"](', 
-      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
-      'relation["amenity"~"cafe|restaurant|fast_food|toilets"](', 
-      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
-      
-      'node["tourism"~"attraction|hotel|hostel|guest_house|apartment"](', 
-      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
-      'way["tourism"~"attraction|hotel|hostel|guest_house|apartment"](', 
-      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
-      'relation["tourism"~"attraction|hotel|hostel|guest_house|apartment"](', 
-      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
-      ');',
-      'out center;'
-    )
-    
-    q <- osmdata::osmdata_sf(doc = overpass_query)
+    q <- opq(bbox = small_bbox, timeout = 300) %>%
+      add_osm_features(features = list(
+        "amenity" = c("cafe", "restaurant", "fast_food", "toilets"),
+        "tourism" = c("attraction", "hotel", "hostel", "guest_house", "apartment")
+      )) %>%
+      osmdata_sf()
     
     if (!is.null(q$osm_points) && nrow(q$osm_points) > 0) {
       pois_all[[length(pois_all) + 1]] <- q$osm_points
@@ -320,10 +304,6 @@ all_pois <- do.call(rbind, lapply(poi_list, function(df) {
     NULL
   }
 }))
-
-all_pois <- all_pois %>%
-  filter(!is.na(amenity)) %>%
-  mutate(name = ifelse(is.na(name) | name == "", "No name", name))
   
   
 # Plot
@@ -354,7 +334,7 @@ leaflet() %>%
   addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>% # Chargers and POIs are fetched from the grid of points within the route buffer
   addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
   addCircleMarkers(data = all_chargers, color = "orange", radius = 5, group = "EV Chargers") %>%
-  addCircleMarkers(data = all_pois, color = "purple", radius = 4, label = ~name, group = "Hospitality POIs") %>%
+  addCircleMarkers(data = all_pois, color = "purple", radius = 4, group = "Hospitality POIs") %>%
   addLayersControl(
     overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Hospitality POIs"),
     options = layersControlOptions(collapsed = FALSE)
