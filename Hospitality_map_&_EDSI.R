@@ -206,6 +206,72 @@ for (i in seq_along(routes_list)) {
   message("Finished processing for ", dest_id)
 }
 
+# ---- EDSI RAW VARIABLE CALCULATION LOOP ----
+edsi_df <- data.frame(
+  destination = character(),
+  charger_density = numeric(),
+  fast_charger_pct = numeric(),
+  poi_density = numeric(),
+  avg_interstation = numeric(),
+  stringsAsFactors = FALSE
+)
+
+
+for (dest_id in names(chargers_list)) {
+  chargers <- chargers_list[[dest_id]]
+  pois <- poi_list[[dest_id]]
+  route <- routes_list[[dest_id]]
+  
+  # Charger density per 100km
+  route_length <- sum(st_length(route)) / 1000  # in km
+  if (!is.null(chargers) && as.numeric(route_length) > 0) {
+    charger_density <- nrow(chargers) / (as.numeric(route_length) / 100)
+  } else {
+    charger_density <- 0
+  }
+  
+  # % fast chargers
+  fast_pct <- if (!is.null(chargers) && nrow(chargers) > 0) mean(chargers$fast, na.rm = TRUE) else 0
+  
+  # Convert chargers to sf
+  chargers_sf <- if (!is.null(chargers) && nrow(chargers) > 0)
+    st_as_sf(chargers, coords = c("lon", "lat"), crs = 4326)
+  else NULL
+  
+  # Convert pois to sf if not already
+  if (!inherits(pois, "sf") && !is.null(pois)) {
+    if ("geometry" %in% names(pois)) {
+      pois <- st_as_sf(pois)
+    } else {
+      pois <- NULL
+    }
+  }
+  
+  # POI density near chargers (within 1 km)
+  if (!is.null(pois) && nrow(pois) > 0 && !is.null(chargers_sf) && nrow(chargers_sf) > 0) {
+    pois_near <- st_join(chargers_sf, pois, join = st_is_within_distance, dist = 1000)
+    poi_density <- nrow(na.omit(pois_near)) / nrow(chargers)
+  } else {
+    poi_density <- 0
+  }
+  
+  # Average inter-station distance
+  if (!is.null(chargers_sf) && nrow(chargers_sf) > 1) {
+    dist_matrix <- st_distance(chargers_sf)
+    avg_interstation <- mean(dist_matrix[lower.tri(dist_matrix)], na.rm = TRUE) / 1000  # km
+  } else {
+    avg_interstation <- NA
+  }
+  
+  edsi_df <- rbind(edsi_df, data.frame(
+    destination = dest_id,
+    charger_density = charger_density,
+    fast_charger_pct = fast_pct,
+    poi_density = poi_density,
+    avg_interstation = as.numeric(avg_interstation)
+  ))
+}
+
 # --- Visualize buffer, grid points, chargers, and hospitality POIs ---
 # Combine all chargers into one sf object
 all_chargers <- do.call(rbind, lapply(chargers_list, function(df) {
@@ -229,7 +295,6 @@ all_chargers <- do.call(rbind, lapply(chargers_list, function(df) {
     }
 }))
 
-  # Har tilføjet dette til at filtrere POIs med no name fra - men når man holder musen er der dog flere der hedder 'no name'
   all_pois <- all_pois %>%
     filter(!is.na(amenity)) %>%
     mutate(name = ifelse(is.na(name) | name == "", "No name", name))
@@ -268,93 +333,60 @@ leaflet() %>%
   ) %>%
   addScaleBar(position = "bottomleft")
   
-# Calculate EV-Driving-Suitability-Index (EDSI)
-# Store in empty dataframe
-edsi_df <- data.frame(destination = character(), charger_density = numeric(),
-                      fast_charger_pct = numeric(), poi_density = numeric(),
-                      avg_interstation = numeric(), stringsAsFactors = FALSE)
+# --- Improved Normalization Functions ---
+# Linear min-max, quantile, and log-minmax provided for flexibility
 
 normalize <- function(x, epsilon = 0.01) {
   rng <- max(x, na.rm = TRUE) - min(x, na.rm = TRUE)
-  if (rng == 0) {
-    rep(0.5, length(x))
-  } else {
+  if (rng == 0) rep(0.5, length(x))
+  else {
     norm <- (x - min(x, na.rm = TRUE)) / rng
-    norm <- norm * (1 - 2 * epsilon) + epsilon
-    return(norm)
+    norm * (1 - 2 * epsilon) + epsilon
   }
 }
 
-for (dest_id in names(chargers_list)) {
-  chargers <- chargers_list[[dest_id]]
-  pois <- poi_list[[dest_id]]
-  route <- routes_list[[dest_id]]
-  
-  # Charger density per 100km
-  route_length <- sum(st_length(route)) / 1000  # in km
-  if (as.numeric(route_length) > 0) {
-    charger_density <- nrow(chargers) / (as.numeric(route_length) / 100)
-  } else {
-    charger_density <- 0
-  }
-  
-  # % fast chargers
-  fast_pct <- ifelse(nrow(chargers) > 0, mean(chargers$fast, na.rm = TRUE), 0)
-  
-  # Convert chargers to sf
-  chargers_sf <- st_as_sf(chargers, coords = c("lon", "lat"), crs = 4326)
-  
-  # Convert pois to sf if not already
-  if (!inherits(pois, "sf") && !is.null(pois)) {
-    if ("geometry" %in% names(pois)) {
-      pois <- st_as_sf(pois)
-    } else {
-      pois <- NULL
-    }
-  }
-  
-  # POI density near chargers (within 1 km)
-  if (!is.null(pois) && nrow(pois) > 0 && nrow(chargers_sf) > 0) {
-    pois_near <- st_join(chargers_sf, pois, join = st_is_within_distance, dist = 1000)
-    poi_density <- nrow(na.omit(pois_near)) / nrow(chargers)
-  } else {
-    poi_density <- 0
-  }
-  
-  # Average inter-station distance
-  if (nrow(chargers) > 1) {
-    dist_matrix <- st_distance(chargers_sf)
-    avg_interstation <- mean(dist_matrix[lower.tri(dist_matrix)], na.rm = TRUE) / 1000  # km
-  } else {
-    avg_interstation <- NA
-  }
-  
-  # Append raw values (no normalization inside loop)
-  edsi_df <- rbind(edsi_df, data.frame(
-    destination = dest_id,
-    charger_density = charger_density,
-    fast_charger_pct = fast_pct,
-    poi_density = poi_density,
-    avg_interstation = as.numeric(avg_interstation)
-  ))
+quantile_norm <- function(x) ecdf(x)(x)
+
+log_minmax <- function(x) {
+  x_log <- log1p(x)
+  rng <- range(x_log, na.rm = TRUE)
+  (x_log - rng[1]) / diff(rng)
 }
 
-# Now normalize columns after loop
-edsi_df$charger_density_norm <- normalize(edsi_df$charger_density)
+# --- Normalize Each Component (choose best per variable) ---
+edsi_df$charger_density_norm <- log_minmax(edsi_df$charger_density)
 edsi_df$fast_charger_pct_norm <- normalize(edsi_df$fast_charger_pct)
-edsi_df$poi_density_norm <- normalize(edsi_df$poi_density)
+edsi_df$poi_density_norm <- quantile_norm(edsi_df$poi_density)
 edsi_df$avg_interstation_norm <- normalize(edsi_df$avg_interstation)
 
-# Compute final EDSI score (inverse avg_interstation)
-edsi_df$EDSI <- rowMeans(data.frame(
+# --- Calculate Subscores ---
+# Infrastructure: charger density, fast charger %, avg interstation distance (inverse)
+edsi_df$Infrastructure <- rowMeans(data.frame(
   edsi_df$charger_density_norm,
   edsi_df$fast_charger_pct_norm,
-  edsi_df$poi_density_norm,
   1 - edsi_df$avg_interstation_norm
+), na.rm = TRUE)
+
+# Comfort: just POI density (or add more comfort features if available)
+edsi_df$Comfort <- edsi_df$poi_density_norm
+
+# Combined EDSI: mean of Infrastructure and Comfort
+edsi_df$EDSI <- rowMeans(data.frame(
+  edsi_df$Infrastructure,
+  edsi_df$Comfort
 ), na.rm = TRUE)
 
 # View the results
 print(edsi_df)
+
+library(tidyr)
+edsi_long <- pivot_longer(edsi_df, cols = c(EDSI, Infrastructure, Comfort), names_to = "Score", values_to = "Value")
+
+ggplot(edsi_long, aes(x = destination, y = Value, fill = Score)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = round(Value, 2)), position = position_dodge(width = 0.9), vjust = -0.5) +
+  labs(title = "EV-Driving-Suitability & Subscores", y = "Score (0-1 scale)", x = "Destination") +
+  theme_minimal()
 
 ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
   geom_col() +
@@ -362,5 +394,6 @@ ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
   labs(title = "EV-Driving-Suitability-Index (EDSI)", y = "EDSI (0-1 Scale)", x = "Destination") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
   theme_minimal()
+
 
 
