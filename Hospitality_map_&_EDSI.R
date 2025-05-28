@@ -166,7 +166,7 @@ for (i in seq_along(routes_list)) {
   
   chargers_list[[dest_id]] <- chargers_df_all
   
-  # --- Query hospitality POIs in smaller chunks ---
+  # --- Query hospitality POIs ---
   pois_all <- list()
   for (j in 1:nrow(grid_points)) {
     coords <- st_coordinates(grid_points[j, ])
@@ -174,16 +174,34 @@ for (i in seq_along(routes_list)) {
     lat <- coords[2]
     small_bbox <- c(lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05)
     
-    # Query OSM for restaurants and cafes
-    q <- opq(bbox = small_bbox, timeout = 300) %>%
-      add_osm_feature(key = "amenity") %>%
-      osmdata_sf()
+    # Craft advanced Overpass query
+    overpass_query <- paste0(
+      '[out:json][timeout:300];',
+      '(',
+      'node["amenity"~"cafe|restaurant|fast_food|toilets"](', 
+      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
+      'way["amenity"~"cafe|restaurant|fast_food|toilets"](', 
+      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
+      'relation["amenity"~"cafe|restaurant|fast_food|toilets"](', 
+      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
+      
+      'node["tourism"~"attraction|hotel|hostel|guest_house|apartment"](', 
+      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
+      'way["tourism"~"attraction|hotel|hostel|guest_house|apartment"](', 
+      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
+      'relation["tourism"~"attraction|hotel|hostel|guest_house|apartment"](', 
+      small_bbox[2], ',', small_bbox[1], ',', small_bbox[4], ',', small_bbox[3], ');',
+      ');',
+      'out center;'
+    )
+    
+    q <- osmdata::osmdata_sf(doc = overpass_query)
     
     if (!is.null(q$osm_points) && nrow(q$osm_points) > 0) {
       pois_all[[length(pois_all) + 1]] <- q$osm_points
     }
     
-    Sys.sleep(3)  # Pause to avoid rate limiting
+    Sys.sleep(3)
   }
   
   # Combine POI results (if any)
@@ -195,8 +213,17 @@ for (i in seq_along(routes_list)) {
     pois_df_all <- dplyr::bind_rows(pois_all_df)
     
     # Keep only the desired columns
-    pois_df_all <- pois_df_all %>%
-      dplyr::select(osm_id, name, amenity, geometry)
+    cols_exist <- c("tourism", "amenity") %in% colnames(pois_df_all)
+    if (any(cols_exist)) {
+      pois_df_all <- pois_df_all %>%
+        dplyr::filter(
+          (if ("tourism" %in% colnames(.)) tourism %in% c("attraction", "hotel", "hostel", "guest_house", "apartment") else FALSE) |
+            (if ("amenity" %in% colnames(.)) amenity %in% c("cafe", "restaurant", "fast_food", "toilets") else FALSE)
+        ) %>%
+        dplyr::select(osm_id, any_of(c("tourism", "amenity")), geometry)
+    } else {
+      pois_df_all <- pois_df_all %>% dplyr::select(osm_id, geometry)
+    }
     
     poi_list[[dest_id]] <- pois_df_all
   } else {
@@ -215,7 +242,6 @@ edsi_df <- data.frame(
   avg_interstation = numeric(),
   stringsAsFactors = FALSE
 )
-
 
 for (dest_id in names(chargers_list)) {
   chargers <- chargers_list[[dest_id]]
@@ -286,24 +312,25 @@ all_chargers <- do.call(rbind, lapply(chargers_list, function(df) {
 }))
 
 # Combine all POIs into one sf object
-  all_pois <- do.call(rbind, lapply(poi_list, function(df) {
-    if (!is.null(df)) {
-      # POIs from OSM already have geometry
-      st_as_sf(df, crs = 4326)
-    } else {
-      NULL
-    }
+all_pois <- do.call(rbind, lapply(poi_list, function(df) {
+  if (!is.null(df)) {
+    # POIs from OSM already have geometry
+    st_as_sf(df, crs = 4326)
+  } else {
+    NULL
+  }
 }))
 
-  all_pois <- all_pois %>%
-    filter(!is.na(amenity)) %>%
-    mutate(name = ifelse(is.na(name) | name == "", "No name", name))
+all_pois <- all_pois %>%
+  filter(!is.na(amenity)) %>%
+  mutate(name = ifelse(is.na(name) | name == "", "No name", name))
   
   
 # Plot
 ggplot() +
   geom_sf(data = do.call(rbind, buffers_list), fill = "lightblue", alpha = 0.3, color = NA) +
   geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
+  geom_sf(data = grid_points, color = "pink", size = 1) +     # Grid sampling points with 5 km buffer
   geom_sf(data = all_chargers, color = "orange", size = 1, alpha = 0.9) +
   geom_sf(data = all_pois, color = "purple", size = 1, alpha = 0.9) +
   labs(
@@ -324,16 +351,17 @@ ggplot() +
 leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
-  addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffers") %>%
+  addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>% # Chargers and POIs are fetched from the grid of points within the route buffer
+  addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
   addCircleMarkers(data = all_chargers, color = "orange", radius = 5, group = "EV Chargers") %>%
   addCircleMarkers(data = all_pois, color = "purple", radius = 4, label = ~name, group = "Hospitality POIs") %>%
   addLayersControl(
-    overlayGroups = c("Routes", "Buffers", "EV Chargers", "Hospitality POIs"),
+    overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Hospitality POIs"),
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
   addScaleBar(position = "bottomleft")
   
-# --- Improved Normalization Functions ---
+# --- Normalization Functions ---
 # Linear min-max, quantile, and log-minmax provided for flexibility
 
 normalize <- function(x, epsilon = 0.01) {
