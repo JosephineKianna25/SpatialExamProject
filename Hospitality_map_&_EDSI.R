@@ -229,6 +229,12 @@ all_chargers <- do.call(rbind, lapply(chargers_list, function(df) {
     }
 }))
 
+  # Har tilføjet dette til at filtrere POIs med no name fra - men når man holder musen er der dog flere der hedder 'no name'
+  all_pois <- all_pois %>%
+    filter(!is.na(amenity)) %>%
+    mutate(name = ifelse(is.na(name) | name == "", "No name", name))
+  
+  
 # Plot
 ggplot() +
   geom_sf(data = do.call(rbind, buffers_list), fill = "lightblue", alpha = 0.3, color = NA) +
@@ -254,16 +260,14 @@ leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
   addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffers") %>%
-  addCircleMarkers(data = all_chargers, color = "orange", radius = 5)  %>%
+  addCircleMarkers(data = all_chargers, color = "orange", radius = 5, group = "EV Chargers") %>%
+  addCircleMarkers(data = all_pois, color = "purple", radius = 4, label = ~name, group = "Hospitality POIs") %>%
   addLayersControl(
-    overlayGroups = c("Routes", "Buffers", " EV Chargers", "Hospitality POIs"),
+    overlayGroups = c("Routes", "Buffers", "EV Chargers", "Hospitality POIs"),
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
   addScaleBar(position = "bottomleft")
   
-  # addCircleMarkers(data = all_pois, color = "purple", radius = 4, label = ~name, group = "Hospitality POIs")
-  # DEN HER LINJE ØDELÆGGER PLOTTET. MÅSKE COPILOT KAN HJÆLPE MED HVAD DER GÅR GALT I SCRIPTET
-
 # Calculate EV-Driving-Suitability-Index (EDSI)
 # Store in empty dataframe
 edsi_df <- data.frame(destination = character(), charger_density = numeric(),
