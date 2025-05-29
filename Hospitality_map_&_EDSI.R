@@ -201,7 +201,7 @@ for (i in seq_along(routes_list)) {
     if (any(cols_exist)) {
       pois_df_all <- pois_df_all %>%
         dplyr::filter(
-          (if ("tourism" %in% colnames(.)) tourism %in% c("attraction", "hotel", "hostel", "guest_house", "apartment") else FALSE) |
+          (if ("tourism" %in% colnames(.)) tourism %in% c("hotel", "hostel", "guest_house", "apartment") else FALSE) |
             (if ("amenity" %in% colnames(.)) amenity %in% c("cafe", "restaurant", "fast_food", "toilets") else FALSE)
         ) %>%
         dplyr::select(osm_id, any_of(c("tourism", "amenity")), geometry)
@@ -304,6 +304,18 @@ all_pois <- do.call(rbind, lapply(poi_list, function(df) {
     NULL
   }
 }))
+
+# "Food spots" = amenities (cafe, restaurant, fast_food)
+food_amenities <- all_pois %>%
+  filter(!is.na(amenity) & amenity %in% c("cafe", "restaurant", "fast_food"))
+
+# "Toilets" = amenities (toilets)
+toilet_amenities <- all_pois %>%
+  filter(!is.na(amenity) & amenity == "toilets")
+
+# "Overnight stays" = tourism (hotel, hostel, apartment, guest house)
+tourism_pois <- all_pois %>%
+  filter(!is.na(tourism))
   
   
 # Plot
@@ -334,12 +346,22 @@ leaflet() %>%
   addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>% # Chargers and POIs are fetched from the grid of points within the route buffer
   addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
   addCircleMarkers(data = all_chargers, color = "orange", radius = 5, group = "EV Chargers") %>%
-  addCircleMarkers(data = all_pois, color = "purple", radius = 4, group = "Hospitality POIs") %>%
+  addCircleMarkers(data = food_amenities, color = "purple", radius = 4, group = "Food Spots", label = ~amenity) %>% 
+  addCircleMarkers(data = toilet_amenities, color = "green", radius = 4, group = "Toilets", label = ~amenity) %>%
+  addCircleMarkers(data = tourism_pois, color = "red", radius = 4, group = "Tourism", label = ~tourism) %>% # Overnight stays
   addLayersControl(
-    overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Hospitality POIs"),
+    overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Food Spots", "Toilets", "Overnight stays"),
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
-  addScaleBar(position = "bottomleft")
+  # Legend
+  addLegend(position = "bottomright",
+            colors = c("purple", "green", "red"),
+            labels = c("Food Spots",
+                       "Toilets",
+                       "Overnight stays",
+            title = "POI Types",
+            opacity = 1) %>%
+  addScaleBar(position = "bottomleft"))
   
 # --- Normalization Functions ---
 # Linear min-max, quantile, and log-minmax provided for flexibility
