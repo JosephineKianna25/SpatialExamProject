@@ -343,25 +343,24 @@ ggplot() +
 leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
-  addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>% # Chargers and POIs are fetched from the grid of points within the route buffer
+  addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>%
   addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
   addCircleMarkers(data = all_chargers, color = "orange", radius = 5, group = "EV Chargers") %>%
   addCircleMarkers(data = food_amenities, color = "purple", radius = 4, group = "Food Spots", label = ~amenity) %>% 
   addCircleMarkers(data = toilet_amenities, color = "green", radius = 4, group = "Toilets", label = ~amenity) %>%
-  addCircleMarkers(data = tourism_pois, color = "red", radius = 4, group = "Tourism", label = ~tourism) %>% # Overnight stays
+  addCircleMarkers(data = tourism_pois, color = "red", radius = 4, group = "Overnight Stays", label = ~tourism) %>%
   addLayersControl(
-    overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Food Spots", "Toilets", "Overnight stays"),
+    overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Food Spots", "Toilets", "Overnight Stays"),
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
-  # Legend
   addLegend(position = "bottomright",
             colors = c("purple", "green", "red"),
             labels = c("Food Spots",
                        "Toilets",
-                       "Overnight stays",
+                       "Overnight stays"),
             title = "POI Types",
             opacity = 1) %>%
-  addScaleBar(position = "bottomleft"))
+  addScaleBar(position = "bottomleft")
   
 # --- Normalization Functions ---
 # Linear min-max, quantile, and log-minmax provided for flexibility
