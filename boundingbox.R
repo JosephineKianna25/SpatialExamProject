@@ -1,9 +1,5 @@
-# Her laver vi bounding box
-
-# Script 1: Simple Buffer 2000 km South of Aarhus
-
-# Install packages
-install.packages(c("sf", "ggplot", "rnaturalearth", "rnaturalearthdata", "osmdata", "dplyr", "ggrepel"))
+# Install packages (run only once)
+install.packages(c("sf", "ggplot2", "rnaturalearth", "rnaturalearthdata", "osmdata", "dplyr", "ggrepel", "viridis"))
 
 # Load required libraries
 library(sf)
@@ -16,18 +12,15 @@ library(ggrepel)
 library(viridis)
 
 # Set CRS
-
 crs_wgs <- 4326
 crs_proj <- 3857  # Web Mercator for distance calculation
 
 # Aarhus coordinates
-
 aarhus <- st_sfc(st_point(c(10.2039, 56.1629)), crs = crs_wgs)
 aarhus_proj <- st_transform(aarhus, crs_proj)
 aarhus_coords <- st_coordinates(aarhus_proj)
 
 # Create 2000 km southward buffer
-
 buffer_width <- 2000000  # 2000 km east-west
 buffer_height <- 2000000  # 2000 km south
 
@@ -46,7 +39,6 @@ buffer_rect <- st_polygon(list(rbind(
   st_sfc(crs = crs_proj)
 
 # Load large cities from OSM (within a wide bounding box)
-
 bbox <- c(xmin = 0, ymin = 40, xmax = 25, ymax = 60)
 cities_osm <- opq(bbox = bbox, timeout = 120) %>%
   add_osm_feature(key = "place", value = "city") %>%
@@ -60,7 +52,6 @@ cities <- cities_osm$osm_points %>%
   st_transform(crs_proj)
 
 # Get cities within the buffer
-
 cities_in_buffer <- cities[st_intersects(cities, buffer_rect, sparse = FALSE), ]
 
 # Compute distance from Aarhus to every city in buffer, in kilometers
@@ -72,7 +63,6 @@ cities_in_buffer$label <- paste0(
 )
 
 # Load countries and crop
-
 countries <- ne_countries(scale = "medium", returnclass = "sf") %>%
   st_transform(crs_proj)
 countries_clip <- st_intersection(countries, buffer_rect)
@@ -84,42 +74,67 @@ highlighted_cities <- c("Lyon", "Torino", "Zagreb", "Budapest")
 cities_highlight <- cities_in_buffer %>%
   filter(name %in% highlighted_cities)
 
-# Create buffer circles og 50 km radius = 50000 meters
- highlight_buffers <- st_buffer(cities_highlight, dist = 50000)
+# Create buffer circles of 50 km radius
+highlight_buffers <- st_buffer(cities_highlight, dist = 50000)
 
- # Prepare a data frame with coordinates for labels
- cities_label_df <- cities_in_buffer %>%
-   st_drop_geometry() %>%
-   mutate(
-     X = st_coordinates(cities_in_buffer)[,1],
-     Y = st_coordinates(cities_in_buffer)[,2]
-   )
- 
- ggplot() +
-   # Countries as background
-   geom_sf(data = countries_clip, fill = "antiquewhite") +
-   # Big buffer rectangle
-   geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
-   # Highlighted city buffers
-   geom_sf(data = highlight_buffers, fill = NA, color = "black", size = 2, linetype = "longdash") +
-   # All city points
-   geom_sf(data = cities_in_buffer, color = "darkgreen", size = 3) +
-   # Labels for all cities (with distances)
-   geom_text_repel(
-     data = cities_label_df,
-     aes(x = X, y = Y, label = label),
-     size = 3,
-     family = "Times New Roman",
-     fontface = "bold",
-     max.overlaps = 15
-   ) +
-   # Optionally: bigger points for highlighted cities
-   geom_sf(data = cities_highlight, color = "red", size = 3) +
-   # Aarhus
-   geom_sf(data = aarhus_proj, color = "red", size = 4) +
-   labs(
-     title = "Cities Within 2000 km Buffer South of Aarhus"
-   ) +
-   theme_minimal()
- 
+# Aarhus label
+aarhus_label_df <- data.frame(
+  label = "Aarhus\n0 km",
+  X = aarhus_coords[1],
+  Y = aarhus_coords[2]
+)
 
+# Labels for all cities
+cities_label_df <- cities_in_buffer %>%
+  st_drop_geometry() %>%
+  mutate(
+    X = st_coordinates(cities_in_buffer)[,1],
+    Y = st_coordinates(cities_in_buffer)[,2]
+  )
+
+label_df <- bind_rows(cities_label_df, aarhus_label_df)
+
+# Assign city types
+cities_in_buffer$type <- "Other major cities"
+cities_highlight$type <- "Selected cities (Aarhus + destinations)"
+aarhus_sf <- st_sf(geometry = aarhus_proj, type = "Selected cities (Aarhus + destinations)")
+
+# Combine all cities
+all_cities <- rbind(
+  cities_in_buffer %>% select(geometry, type),
+  cities_highlight %>% select(geometry, type),
+  aarhus_sf
+)
+
+# Final Plot
+ggplot() +
+  # Countries background
+  geom_sf(data = countries_clip, fill = "antiquewhite") +
+  # Buffer rectangle
+  geom_sf(data = buffer_rect, fill = NA, color = "blue", linetype = "dashed") +
+  # Highlighted city buffers
+  geom_sf(data = highlight_buffers, fill = NA, color = "black", size = 2, linetype = "longdash") +
+  # Plot all cities with colors based on type
+  geom_sf(data = all_cities, aes(color = type), size = 3) +
+  # Labels
+  geom_text_repel(
+    data = label_df,
+    aes(x = X, y = Y, label = label),
+    size = 3,
+    family = "Times New Roman",
+    fontface = "bold",
+    max.overlaps = 15
+  ) +
+  # Color legend
+  scale_color_manual(values = c(
+    "Selected cities (Aarhus + destinations)" = "red",
+    "Other major cities" = "darkgreen"
+  )) +
+  labs(
+    title = "Major Cities Within 2000 km South of Aarhus (Population > 500,000)",
+    color = "City Type"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 20, hjust = 0.5)
+  )
