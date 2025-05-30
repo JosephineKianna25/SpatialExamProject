@@ -225,10 +225,7 @@ edsi_df <- data.frame(
   fast_charger_pct = numeric(),
   poi_density = numeric(),
   avg_interstation = numeric(),
-  stringsAsFactors = FA
-  
-  
-  S
+  stringsAsFactors = FALSE
 )
 
 for (dest_id in names(chargers_list)) {
@@ -321,7 +318,6 @@ toilet_amenities <- all_pois %>%
 tourism_pois <- all_pois %>%
   filter(!is.na(tourism))
   
-  
 # Plot
 ggplot() +
   geom_sf(data = do.call(rbind, buffers_list), fill = "lightblue", alpha = 0.3, color = NA) +
@@ -344,13 +340,14 @@ ggplot() +
     panel.grid = element_blank()
   )
 
+# Interactive map
 leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
   addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>%
   addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
-  addCircleMarkers(data = all_chargers, color = "orange", radius = 5, group = "EV Chargers") %>%
-  addCircleMarkers(data = food_amenities, color = "purple", radius = 4, group = "Food Spots", label = ~amenity) %>% 
+  addCircleMarkers(data = all_chargers, color = "purple", radius = 5, group = "EV Chargers") %>%
+  addCircleMarkers(data = food_amenities, color = "orange", radius = 4, group = "Food Spots", label = ~amenity) %>% 
   addCircleMarkers(data = toilet_amenities, color = "green", radius = 4, group = "Toilets", label = ~amenity) %>%
   addCircleMarkers(data = tourism_pois, color = "red", radius = 4, group = "Overnight Stays", label = ~tourism) %>%
   addLayersControl(
@@ -358,17 +355,19 @@ leaflet() %>%
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
   addLegend(position = "bottomright",
-            colors = c("purple", "green", "red"),
-            labels = c("Food Spots",
+            colors = c("purple", "orange", "green", "red"),
+            labels = c("EV Chargers",
+                       "Food Spots",
                        "Toilets",
                        "Overnight stays"),
-            title = "POI Types",
+            title = "Chargers & POI Types",
             opacity = 1) %>%
   addScaleBar(position = "bottomleft")
 
+# With topography
 leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron, group = "Positron") %>%
-  addProviderTiles(providers$OpenTopoMap, group = "Topography") %>%  # Topographic/hillshade
+  addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
   addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>%
   addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
@@ -382,14 +381,130 @@ leaflet() %>%
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
   addLegend(position = "bottomright",
-            colors = c("orange", "green", "red"),
-            labels = c("Food Spots", "Toilets", "Overnight stays"),
+            colors = c("purple", "orange", "green", "red"),
+            labels = c("EV Chargers", "Food Spots", "Toilets", "Overnight stays"),
             title = "POI Types",
             opacity = 1) %>%
   addScaleBar(position = "bottomleft")
 
+# Subplots
+# Create type-labeled sf objects
+ev_chargers_sf <- all_chargers %>%
+  mutate(type = "EV Charger")
 
-  
+food_spots_sf <- food_amenities %>%
+  mutate(type = "Food Spot")
+
+toilets_sf <- toilet_amenities %>%
+  mutate(type = "Toilets")
+
+overnight_sf <- tourism_pois %>%
+  mutate(type = "Overnight Stay")
+
+# Combine them all
+all_poi_long <- bind_rows(ev_chargers_sf, food_spots_sf, toilets_sf, overnight_sf)
+
+# Start point
+start_sf$city <- "Aarhus"
+
+# Destination points already have IDs
+dest_sf$city <- dest_sf$id
+
+# Combine start and destinations
+city_points <- bind_rows(start_sf, dest_sf)
+
+# Prepare the combined geometries for bounding box
+all_geom <- c(
+  st_geometry(all_poi_long),
+  st_geometry(do.call(rbind, routes_list)),
+  st_geometry(city_points)
+)
+bbox <- st_bbox(do.call(c, all_geom))
+pad <- 1
+xlim <- c(bbox["xmin"] - pad, bbox["xmax"] + pad)
+ylim <- c(bbox["ymin"] - pad, bbox["ymax"] + pad)
+
+# Color mapping for POI types
+poi_colors <- c(
+  "EV Charger" = "purple",
+  "Food Spot" = "orange",
+  "Toilets" = "green",
+  "Overnight Stay" = "red"
+)
+
+# Collective plot
+ggplot() +
+  geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
+  geom_sf(data = all_poi_long, aes(color = type), size = 1.5, alpha = 0.85, show.legend = FALSE) +
+  geom_sf(data = city_points, color = "black", size = 2, shape = 21, fill = "yellow") +
+  ggrepel::geom_text_repel(
+    data = city_points,
+    aes(geometry = geometry, label = city),
+    stat = "sf_coordinates",
+    size = 3.5,
+    fontface = "bold"
+  ) +
+  facet_wrap(~type, ncol = 2) +  # Facet after adding countries
+  scale_color_manual(values = poi_colors, drop = FALSE) +
+  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+  labs(
+    title = "Density and Distribution of POI Types Along EV Travel Routes",
+    subtitle = "Each facet shows one POI category",
+    caption = "Data: OpenStreetMap, OpenChargeMap"
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 13, hjust = 0.5),
+    strip.text = element_text(face = "bold", size = 13),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+
+# Plot POI density
+ggplot() +
+  geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
+  geom_hex(
+    data = all_poi_long,
+    aes(x = st_coordinates(geometry)[,1], y = st_coordinates(geometry)[,2]),
+    bins = 40,
+    alpha = 0.8
+  ) +
+  scale_fill_viridis_c(
+     option = "C",
+    direction = -1,
+    name = "POI Count",
+    limits = c(0, 25),  # adjust this range as needed
+    oob = scales::squish     # squish values outside limits to edges
+  ) +
+  geom_sf(data = city_points, color = "black", size = 3, shape = 21, fill = "yellow") +
+  ggrepel::geom_text_repel(
+    data = city_points,
+    aes(geometry = geometry, label = city),
+    stat = "sf_coordinates",
+    size = 5,
+    fontface = "bold"
+  ) +
+  facet_wrap(~type, ncol = 2) +
+  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+  labs(
+    title = "Density and Distribution of POI Types Along EV Travel Routes",
+    subtitle = "Each facet shows one POI category",
+    caption = "Data: OpenStreetMap, OpenChargeMap",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+    plot.subtitle = element_text(size = 13, hjust = 0.5),
+    strip.text = element_text(face = "bold", size = 16),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+
 # --- Normalization Functions ---
 # Linear min-max, quantile, and log-minmax provided for flexibility
 
@@ -439,6 +554,7 @@ print(edsi_df)
 library(knitr)
 install.packages("kableExtra")
 library(kableExtra)
+
 kable(edsi_df, 
       caption = "Table: EDSI Metrics for Selected Destinations", 
       digits = 3, 
@@ -451,66 +567,44 @@ kable(edsi_df,
 library(tidyr)
 edsi_long <- pivot_longer(edsi_df, cols = c(EDSI, Infrastructure, Comfort), names_to = "Score", values_to = "Value")
 
+# EV Driving Suitability Index
 ggplot(edsi_long, aes(x = destination, y = Value, fill = Score)) +
-  geom_col(position = "dodge") +
-  geom_text(aes(label = round(Value, 2)), position = position_dodge(width = 0.9), vjust = -0.5) +
-  labs(title = "EV-Driving-Suitability & Subscores", y = "Score (0-1 scale)", x = "Destination") +
-  theme_minimal()
+  geom_col(position = "dodge", color = "gray30", width = 0.7) +
+  geom_text(aes(label = round(Value, 2)), position = position_dodge(width = 0.7), vjust = -0.5, size = 4, color = "black") +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "EV-Driving-Suitability & Subscores",
+    subtitle = "Comparison by Destination",
+    y = "Score (0-1 scale)",
+    x = "Destination",
+    fill = "Subscore"
+  ) +
+  theme_light(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 13, margin = margin(b = 10)),
+    axis.text.x = element_text(angle = 15, hjust = 1, size = 12),
+    legend.position = "top"
+  )
 
 ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
-  geom_col() +
-  geom_text(aes(label = round(EDSI, 2)), vjust = -0.5) +
-  labs(title = "EV-Driving-Suitability-Index (EDSI)", y = "EDSI (0-1 Scale)", x = "Destination") +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
-  theme_minimal()# Compute bounding box of all your POIs and routes
-library(sf)
-all_geom <- c(
-  st_geometry(all_poi_long),
-  st_geometry(do.call(rbind, routes_list)),
-  st_geometry(city_points)
-)
-bbox <- st_bbox(do.call(c, all_geom))
-# Add a little padding
-pad <- 1
-xlim <- c(bbox["xmin"] - pad, bbox["xmax"] + pad)
-ylim <- c(bbox["ymin"] - pad, bbox["ymax"] + pad)
-
-# Colors for types
-poi_colors <- c(
-  "EV Charger" = "purple",
-  "Food Spot" = "orange",
-  "Toilets" = "green",
-  "Overnight Stay" = "red"
-)
-
-library(ggrepel)
-
-# Now plot!
-ggplot() +
-  geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
-  geom_sf(data = all_poi_long, aes(color = type), size = 2, alpha = 0.85, show.legend = FALSE) +
-  geom_sf(data = city_points, color = "black", size = 3, shape = 21, fill = "yellow") +
-  ggrepel::geom_text_repel(
-    data = city_points,
-    aes(geometry = geometry, label = city),
-    stat = "sf_coordinates",
-    size = 5,
-    fontface = "bold"
-  ) +
-  facet_wrap(~type, ncol = 2) +
-  scale_color_manual(values = poi_colors, drop = FALSE) +
-  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+  geom_col(width = 0.7, color = "gray30") +
+  geom_text(aes(label = round(EDSI, 2)), vjust = -0.5, size = 5, color = "black") +
+  scale_fill_brewer(palette = "Set3") +
   labs(
-    title = "Density and Distribution of POI Types Along EV Travel Routes",
-    subtitle = "Each facet shows one POI category",
-    caption = "Data: OpenStreetMap, OpenChargeMap"
+    title = "EV-Driving-Suitability-Index (EDSI)",
+    subtitle = "Overall Suitability by Destination",
+    y = "EDSI (0-1 Scale)",
+    x = "Destination",
+    fill = "Destination"
   ) +
-  theme_minimal(base_size = 15) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  theme_light(base_size = 15) +
   theme(
-    plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
-    plot.subtitle = element_text(size = 13, hjust = 0.5),
-    strip.text = element_text(face = "bold", size = 16),
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.grid = element_blank()
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 13, margin = margin(b = 10)),
+    axis.text.x = element_text(angle = 15, hjust = 1, size = 12),
+    legend.position = "none"
   )
+
+
