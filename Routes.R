@@ -8,6 +8,7 @@ library(sf)
 library(ggplot2)
 library(rnaturalearth)
 library(rnaturalearthdata)
+library(dplyr)
 
 # Define Aarhus as sf POINT
 from <- st_sf(
@@ -87,9 +88,8 @@ bbox_polygon <- st_as_sfc(bbox_obj)
 # Clip countries by intersecting with buffered bbox polygon
 countries_clipped <- st_intersection(countries_selected, bbox_polygon)
 
-# Prepare points data for text labels
 points_coords <- as.data.frame(st_coordinates(points_all))
-points_coords$name <- points_all$id 
+points_coords$name <- as.character(st_drop_geometry(points_all)$id)
 
 ggplot() +
   geom_sf(data = countries_clipped, fill = "lightgreen", color = "black", size = 0.2) +

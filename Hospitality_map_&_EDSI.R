@@ -225,7 +225,10 @@ edsi_df <- data.frame(
   fast_charger_pct = numeric(),
   poi_density = numeric(),
   avg_interstation = numeric(),
-  stringsAsFactors = FALSE
+  stringsAsFactors = FA
+  
+  
+  S
 )
 
 for (dest_id in names(chargers_list)) {
