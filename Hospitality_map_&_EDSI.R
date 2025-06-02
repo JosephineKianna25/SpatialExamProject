@@ -260,7 +260,7 @@ for (dest_id in names(chargers_list)) {
   
   # POI density near chargers (within 1 km)
   if (!is.null(pois) && nrow(pois) > 0 && !is.null(chargers_sf) && nrow(chargers_sf) > 0) {
-    pois_near <- st_join(chargers_sf, pois, join = st_is_within_distance, dist = 1000)
+    pois_near <- st_join(chargers_sf, pois, join = st_is_within_distance, dist = 2000)
     poi_density <- nrow(na.omit(pois_near)) / nrow(chargers)
   } else {
     poi_density <- 0
@@ -498,10 +498,10 @@ normalize <- function(x, epsilon = 0.01) {
 quantile_norm <- function(x) ecdf(x)(x)
 
 # --- Normalize Each Component (choose best per variable) ---
-edsi_df$charger_density_norm <- normalize(edsi_df$charger_density)
-edsi_df$fast_charger_pct_norm <- normalize(edsi_df$fast_charger_pct)
-edsi_df$poi_density_norm <- normalize(edsi_df$poi_density)
-edsi_df$avg_interstation_norm <- normalize(edsi_df$avg_interstation)
+edsi_df$charger_density_norm <- quantile_norm(edsi_df$charger_density)
+edsi_df$fast_charger_pct_norm <- quantile_norm(edsi_df$fast_charger_pct)
+edsi_df$poi_density_norm <- quantile_norm(edsi_df$poi_density)
+edsi_df$avg_interstation_norm <- quantile_norm(edsi_df$avg_interstation)
 edsi_df$avg_interstation_norm <- 1 - edsi_df$avg_interstation_norm
 
 # --- Calculate Subscores ---
@@ -575,4 +575,69 @@ ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
     legend.position = "none"
   )
 
+# Check where about stops would be necessary with a driving range of 490 km
+get_stops_every_480km <- function(route_sf, dist_km = 490) {
+  # Project route to a suitable projected CRS (UTM zone)
+  # Find UTM zone from the centroid longitude
+  centroid <- st_centroid(route_sf)
+  lon <- st_coordinates(centroid)[1]
+  utm_zone <- floor((lon + 180) / 6) + 1
+  utm_crs <- paste0("EPSG:", 32600 + utm_zone)  # Northern Hemisphere assumed
+  
+  # Transform route to UTM
+  route_proj <- st_transform(route_sf, crs = utm_crs)
+  
+  # Route length in meters (projected CRS units)
+  route_length_m <- as.numeric(st_length(route_proj))
+  
+  # Number of stops
+  n_stops <- floor(route_length_m / (dist_km * 1000))
+  if(n_stops == 0) return(NULL)  # Route shorter than 480 km
+  
+  # Distances along route to place stops (meters)
+  stop_dists_m <- seq(from = dist_km * 1000, to = n_stops * dist_km * 1000, by = dist_km * 1000)
+  
+  # Sample points at these distances
+  stop_points_proj <- st_line_sample(route_proj, sample = stop_dists_m / route_length_m)
+  
+  # Convert MULTIPOINT to POINTS sf
+  stops_proj_sf <- st_sf(
+    geometry = st_cast(stop_points_proj, "POINT"),
+    dist_km = stop_dists_m / 1000
+  )
+  
+  # Transform stops back to WGS84
+  stops_wgs84 <- st_transform(stops_proj_sf, crs = 4326)
+  
+  return(stops_wgs84)
+}
 
+stops_list <- lapply(routes_list, get_stops_every_480km, dist_km = 490)
+
+# Combine all stops into one sf object, adding destination name
+stops_all <- do.call(rbind, lapply(names(stops_list), function(dest) {
+  sf_obj <- stops_list[[dest]]
+  sf_obj$destination <- dest
+  sf_obj
+}))
+
+leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
+  addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
+  addCircleMarkers(data = all_chargers, color = "purple", radius = 4, group = "EV Chargers") %>%
+  addCircleMarkers(data = stops_all, 
+                   color = "gold", radius = 6, 
+                   label = ~paste0(destination, ": ", round(dist_km, 1), " km"),
+                   group = "Stops every 490 km") %>%
+  addLayersControl(
+    baseGroups = c("Positron", "Topography"),
+    overlayGroups = c("Routes", "EV Chargers", "Stops every 490 km"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  addLegend(position = "bottomright",
+            colors = c("purple", "gold"),
+            labels = c("EV Chargers", "Stops every 490 km"),
+            title = "Range with necessary charging breaks",
+            opacity = 1) %>%
+  addScaleBar(position = "bottomleft")
