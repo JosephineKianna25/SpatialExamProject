@@ -317,28 +317,6 @@ toilet_amenities <- all_pois %>%
 # "Overnight stays" = tourism (hotel, hostel, apartment, guest house)
 tourism_pois <- all_pois %>%
   filter(!is.na(tourism))
-  
-# Plot
-ggplot() +
-  geom_sf(data = do.call(rbind, buffers_list), fill = "lightblue", alpha = 0.3, color = NA) +
-  geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
-  geom_sf(data = grid_points, color = "pink", size = 1) +     # Grid sampling points with 5 km buffer
-  geom_sf(data = all_chargers, color = "orange", size = 1, alpha = 0.9) +
-  geom_sf(data = all_pois, color = "purple", size = 1, alpha = 0.9) +
-  labs(
-    title = "Visualization of Buffers, Routes, Chargers, and Hospitality POIs",
-    subtitle = "Data coverage around each route buffer",
-    caption = "Data: OpenStreetMap, OpenChargeMap, project queries"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(face = "bold", size = 16),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 8),
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.grid = element_blank()
-  )
 
 # Interactive map
 leaflet() %>%
@@ -396,7 +374,7 @@ food_spots_sf <- food_amenities %>%
   mutate(type = "Food Spot")
 
 toilets_sf <- toilet_amenities %>%
-  mutate(type = "Toilets")
+  mutate(type = "Toilet")
 
 overnight_sf <- tourism_pois %>%
   mutate(type = "Overnight Stay")
@@ -428,7 +406,7 @@ ylim <- c(bbox["ymin"] - pad, bbox["ymax"] + pad)
 poi_colors <- c(
   "EV Charger" = "purple",
   "Food Spot" = "orange",
-  "Toilets" = "green",
+  "Toilet" = "green",
   "Overnight Stay" = "red"
 )
 
@@ -475,7 +453,7 @@ ggplot() +
      option = "C",
     direction = -1,
     name = "POI Count",
-    limits = c(0, 25),  # adjust this range as needed
+    limits = c(0, 50),  
     oob = scales::squish     # squish values outside limits to edges
   ) +
   geom_sf(data = city_points, color = "black", size = 3, shape = 21, fill = "yellow") +
@@ -506,7 +484,7 @@ ggplot() +
   )
 
 # --- Normalization Functions ---
-# Linear min-max, quantile, and log-minmax provided for flexibility
+# Linear min-max and quantile provided for flexibility
 
 normalize <- function(x, epsilon = 0.01) {
   rng <- max(x, na.rm = TRUE) - min(x, na.rm = TRUE)
@@ -519,24 +497,19 @@ normalize <- function(x, epsilon = 0.01) {
 
 quantile_norm <- function(x) ecdf(x)(x)
 
-log_minmax <- function(x) {
-  x_log <- log1p(x)
-  rng <- range(x_log, na.rm = TRUE)
-  (x_log - rng[1]) / diff(rng)
-}
-
 # --- Normalize Each Component (choose best per variable) ---
-edsi_df$charger_density_norm <- log_minmax(edsi_df$charger_density)
+edsi_df$charger_density_norm <- normalize(edsi_df$charger_density)
 edsi_df$fast_charger_pct_norm <- normalize(edsi_df$fast_charger_pct)
-edsi_df$poi_density_norm <- quantile_norm(edsi_df$poi_density)
+edsi_df$poi_density_norm <- normalize(edsi_df$poi_density)
 edsi_df$avg_interstation_norm <- normalize(edsi_df$avg_interstation)
+edsi_df$avg_interstation_norm <- 1 - edsi_df$avg_interstation_norm
 
 # --- Calculate Subscores ---
 # Infrastructure: charger density, fast charger %, avg interstation distance (inverse)
 edsi_df$Infrastructure <- rowMeans(data.frame(
   edsi_df$charger_density_norm,
   edsi_df$fast_charger_pct_norm,
-  1 - edsi_df$avg_interstation_norm
+  edsi_df$avg_interstation_norm
 ), na.rm = TRUE)
 
 # Comfort: just POI density (or add more comfort features if available)
@@ -547,6 +520,9 @@ edsi_df$EDSI <- rowMeans(data.frame(
   edsi_df$Infrastructure,
   edsi_df$Comfort
 ), na.rm = TRUE)
+
+# Weigh infrastructure higher than Comfort (60-40 split)
+edsi_df$EDSI <- 0.6 * edsi_df$Infrastructure + 0.4 * edsi_df$Comfort
 
 # View the results
 print(edsi_df)
@@ -568,25 +544,17 @@ library(tidyr)
 edsi_long <- pivot_longer(edsi_df, cols = c(EDSI, Infrastructure, Comfort), names_to = "Score", values_to = "Value")
 
 # EV Driving Suitability Index
-ggplot(edsi_long, aes(x = destination, y = Value, fill = Score)) +
+ggplot(edsi_long %>% filter(Score != "EDSI"), aes(x = destination, y = Value, fill = Score)) +
   geom_col(position = "dodge", color = "gray30", width = 0.7) +
-  geom_text(aes(label = round(Value, 2)), position = position_dodge(width = 0.7), vjust = -0.5, size = 4, color = "black") +
+  geom_text(aes(label = round(Value, 2)), position = position_dodge(width = 0.9), vjust = -0.5) +
+  labs(title = "Subscores: Comfort & Infrastructure", y = "Score (0-1 scale)", x = "Destination") +
   scale_fill_brewer(palette = "Set2") +
-  labs(
-    title = "EV-Driving-Suitability & Subscores",
-    subtitle = "Comparison by Destination",
-    y = "Score (0-1 scale)",
-    x = "Destination",
-    fill = "Subscore"
-  ) +
-  theme_light(base_size = 13) +
+  theme_minimal() +
   theme(
-    plot.title = element_text(face = "bold", size = 18),
-    plot.subtitle = element_text(size = 13, margin = margin(b = 10)),
-    axis.text.x = element_text(angle = 15, hjust = 1, size = 12),
-    legend.position = "top"
+    plot.title = element_text(hjust = 0.5, size = 20)
   )
 
+# Comfort & Infrastructure
 ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
   geom_col(width = 0.7, color = "gray30") +
   geom_text(aes(label = round(EDSI, 2)), vjust = -0.5, size = 5, color = "black") +
