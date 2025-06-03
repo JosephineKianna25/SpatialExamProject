@@ -12,6 +12,7 @@ easiest, most time-saving and/or consumer-friendly.
 All necessary files to reproduce the analysis are included in this repository. 
 
 The main script is `Hospitality_map_&_EDSI.R` and should be run from start to finish. 
+
 Data is loaded directly in the script and results are also generated in the script. 
 
 ## Usage and Technical Requirements
