@@ -146,7 +146,7 @@ for (i in seq_along(routes_list)) {
   buffer <- st_transform(buffer_proj, 4326)
   buffers_list[[dest_id]] <- buffer
   
-  # --- Use projected CRS for grid, spacing in meters ---
+  # Using the bounding box of the buffer to create grid points
   bbox_proj <- st_bbox(buffer_proj)
   x_seq <- seq(bbox_proj$xmin, bbox_proj$xmax, by = 20000)
   y_seq <- seq(bbox_proj$ymin, bbox_proj$ymax, by = 20000)
@@ -268,7 +268,7 @@ for (dest_id in names(chargers_list)) {
   # Fast charger percentage
   fast_pct <- if (!is.null(chargers) && nrow(chargers) > 0) mean(chargers$fast, na.rm = TRUE) else 0
   
-  # Converting chargers to sf if not already
+  # Converting chargers to sf object
   chargers_sf <- if (!is.null(chargers) && nrow(chargers) > 0)
     st_as_sf(chargers, coords = c("lon", "lat"), crs = 4326)
   else NULL
@@ -315,9 +315,9 @@ for (dest_id in names(chargers_list)) {
 # Combining all buffers into one sf object
 all_chargers <- do.call(rbind, lapply(chargers_list, function(df) {
   if (!is.null(df)) {
-    # Only keep rows with valid lon/lat
+    # Only keeping rows with valid lon/lat coordinates
     df <- df %>% filter(!is.na(lon) & !is.na(lat))
-    # Create geometry from lon/lat
+    # Creating geometry from lon/lat coordinates
     st_as_sf(df, coords = c("lon", "lat"), crs = 4326)
   } else {
     NULL
@@ -334,9 +334,10 @@ all_pois <- do.call(rbind, lapply(poi_list, function(df) {
   }
 }))
 
-# --- RANN filtering: Only POIs within 5km (5000m) of any charger ---
-utm_crs <- 32632 # UTM zone for central Europe, adjust if you work elsewhere
+# Transforming chargers and POIs to UTM for distance calculations
+utm_crs <- 32632
 
+# If both chargers and POIs are available, we calculate nearest POIs within 5 km of any charger
 if (!is.null(all_chargers) && nrow(all_chargers) > 0 && !is.null(all_pois) && nrow(all_pois) > 0) {
   all_chargers_utm <- st_transform(all_chargers, crs = utm_crs)
   all_pois_utm <- st_transform(all_pois, crs = utm_crs)
@@ -347,11 +348,10 @@ if (!is.null(all_chargers) && nrow(all_chargers) > 0 && !is.null(all_pois) && nr
   pois_within_5km_utm <- all_pois_utm[nearest_dist <= 5000, ]
   pois_within_5km <- st_transform(pois_within_5km_utm, 4326)
 } else {
-  pois_within_5km <- all_pois[0, ] # empty
+  pois_within_5km <- all_pois[0, ]
 }
 
-# --- After creating pois_within_5km (and before plotting/maps) ---
-
+# Filtering POIs for specific amenities and tourism types
 food_amenities <- pois_within_5km %>%
   filter(!is.na(amenity) & amenity %in% c("cafe", "restaurant", "fast_food"))
 
@@ -362,10 +362,8 @@ tourism_pois <- pois_within_5km %>%
   filter(!is.na(tourism))
 
 # Visualizing the routes, buffers, grid points, chargers, and filtered POIs (within 5km of any charger)
-# Adding topographic layer and grid points, with filtered POIs (within 5km of any charger)
 interactive_map <- leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron, group = "Positron") %>%
-  addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
   addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>%
   addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
@@ -374,7 +372,7 @@ interactive_map <- leaflet() %>%
   addCircleMarkers(data = toilet_amenities, color = "green", radius = 4, group = "Toilets", label = ~amenity) %>%
   addCircleMarkers(data = tourism_pois, color = "red", radius = 4, group = "Overnight Stays", label = ~tourism) %>%
   addLayersControl(
-    baseGroups = c("Positron", "Topography"),
+    baseGroups = c("Positron"),
     overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Food Spots", "Toilets", "Overnight Stays"),
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
@@ -385,7 +383,7 @@ interactive_map <- leaflet() %>%
             opacity = 1) %>%
   addScaleBar(position = "bottomleft")
 
-# Save to HTML
+# Saving to HTML
 saveWidget(interactive_map, file = "chargers&pois.html", selfcontained = TRUE)
 
 # Subplots
@@ -405,7 +403,7 @@ overnight_sf <- tourism_pois %>%
 # Combining them all
 all_poi_long <- bind_rows(ev_chargers_sf, food_spots_sf, toilets_sf, overnight_sf)
 
-# Start point
+# Starting point
 start_sf$city <- "Aarhus"
 
 # Destination points already have IDs
@@ -541,7 +539,7 @@ edsi_df$Infrastructure <- rowMeans(data.frame(
   edsi_df$avg_interstation_norm
 ), na.rm = TRUE)
 
-# Comfort: poi density normalized
+# Comfort: normalized POI density
 edsi_df$Comfort <- edsi_df$poi_density_norm
 
 # Calculating the EDSI as a weighted average of Infrastructure and Comfort
@@ -566,7 +564,7 @@ edsi_table <- kable(edsi_df,
   row_spec(0, bold = TRUE, background = "#f7f7f7") %>%
   column_spec(1, bold = TRUE)  # make 'destination' stand out
 
-# Save to HTML file
+# Saving to HTML file
 save_kable(edsi_table, "edsi_metrics_table.html")
 
 # Reshaping the EDSI data for plotting
@@ -656,10 +654,9 @@ stops_all <- do.call(rbind, lapply(names(stops_list), function(dest) {
   sf_obj
 }))
 
-# Visualizing the routes, chargers, stops, and topography
+# Visualizing the routes, chargers and stops
 charger_stops <- leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
-  addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
   addCircleMarkers(data = all_chargers, color = "purple", radius = 4, group = "EV Chargers") %>%
   addCircleMarkers(data = stops_all, 
@@ -667,7 +664,7 @@ charger_stops <- leaflet() %>%
                    label = ~paste0(destination, ": ", round(dist_km, 1), " km"),
                    group = "Stops every 490 km") %>%
   addLayersControl(
-    baseGroups = c("Positron", "Topography"),
+    baseGroups = c("Positron"),
     overlayGroups = c("Routes", "EV Chargers", "Stops every 490 km"),
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
