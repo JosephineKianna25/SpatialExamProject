@@ -1,6 +1,6 @@
 
 # Install and load libraries
-install.packages(c("httr", "jsonlite", "leaflet", "dplyr", "sf", "ggplot2", "osmdata", "osrm", "rnaturalearth", "rnaturalearthdata"))
+install.packages(c("httr", "jsonlite", "leaflet", "dplyr", "sf", "ggplot2", "osmdata", "osrm", "rnaturalearth", "rnaturalearthdata", "ggrepel", "kableExtra", "tidyr", "knitr", "RANN"))
 library(httr)
 library(jsonlite)
 library(leaflet)
@@ -12,11 +12,17 @@ library(osrm)
 library(rnaturalearth)
 library(rnaturalearthdata)
 library(ggrepel)
+library(knitr)
+library(kableExtra)
+library(RANN)
+
+options(timeout = 600)  # Increase HTTP timeout (seconds)
+set_overpass_url("https://overpass-api.de/api/interpreter")
 
 # API key for OpenChargeMap
 api_key <- "f512fd42-eb0d-40df-9b41-41bc8a1c27d5"
 
-# Fetch reference data once (you already have this)
+# Fetch reference data for connection types
 ref_response <- GET(
   "https://api.openchargemap.io/v3/referencedata",
   query = list(key = api_key)
@@ -24,16 +30,19 @@ ref_response <- GET(
 stop_for_status(ref_response)
 ref_data <- fromJSON(rawToChar(ref_response$content))
 
+# Extracting connection types and filtering for Tesla and CCS
 connection_types <- ref_data$ConnectionTypes
 target_types <- connection_types %>%
   filter(grepl("tesla|ccs", Title, ignore.case = TRUE)) %>%
   select(ID, Title)
 
+# Extracting target IDs for filtering
 target_ids <- target_types$ID
 
-# Helper function for charger query
+# Defining a helper function for NULL-safe operations
 `%||%` <- function(a, b) if (!is.null(a)) a else b
 
+# Function to get chargers near a given location
 get_chargers_near <- function(lon, lat, distance_km = 5, api_key = NULL, target_ids = NULL) {
   response <- GET(
     url = "https://api.openchargemap.io/v3/poi/",
@@ -57,7 +66,7 @@ get_chargers_near <- function(lon, lat, distance_km = 5, api_key = NULL, target_
   
   chargers_data <- fromJSON(rawToChar(response$content))
   
-  # Convert to dataframe if necessary
+  # Converting to dataframe if necessary
   if (!is.data.frame(chargers_data)) chargers_data <- as.data.frame(chargers_data)
   
   chargers_df <- bind_rows(lapply(seq_len(nrow(chargers_data)), function(i) {
@@ -81,7 +90,7 @@ get_chargers_near <- function(lon, lat, distance_km = 5, api_key = NULL, target_
     )
   }))
   
-  # --- Fix: Check for 'suitable' column existence before filtering ---
+  # Filtering out rows with NA coordinates
   if ("suitable" %in% colnames(chargers_df)) {
     chargers_df <- chargers_df %>% filter(suitable == 1)
   }
@@ -89,7 +98,7 @@ get_chargers_near <- function(lon, lat, distance_km = 5, api_key = NULL, target_
   return(chargers_df)
 }
 
-# Load or define your destinations (as sf POINTs) and routes 
+# Defining destinations
 destinations <- data.frame(
   id = c("Lyon", "Torino", "Zagreb", "Budapest"),
   lon = c(4.847, 7.743, 15.967, 19.04),
@@ -97,11 +106,11 @@ destinations <- data.frame(
 )
 dest_sf <- st_as_sf(destinations, coords = c("lon", "lat"), crs = 4326)
 
-# Start point: Aarhus
+# Defining the start point (Aarhus)
 start_point <- data.frame(lon = 10.211, lat = 56.157)
 start_sf <- st_as_sf(start_point, coords = c("lon", "lat"), crs = 4326)
 
-# Compute fastest routes using osrmRoute
+# Query routes from Aarhus to each destination
 routes_list <- lapply(1:nrow(dest_sf), function(i) {
   osrmRoute(
     src = st_coordinates(start_sf),
@@ -110,34 +119,41 @@ routes_list <- lapply(1:nrow(dest_sf), function(i) {
     returnclass = "sf"
   )
 })
+
+# Assigning names to the routes list based on destination IDs
 names(routes_list) <- destinations$id
+
+# Combining all routes into one sf object with destination names
 routes_all <- do.call(rbind, lapply(names(routes_list), function(name) {
   routes_list[[name]]$destination <- name
   routes_list[[name]]
 }))
 
-# Query chargers along the routes
+# Creating lists to store buffers, chargers, and POIs
 buffers_list <- list()
 chargers_list <- list()
 poi_list <- list()
 
+# Looping through each route to create buffers, grid points, and query chargers and POIs
 for (i in seq_along(routes_list)) {
   route <- routes_list[[i]]
   dest_id <- names(routes_list)[i]
   
-  # Buffer around route
-  buffer <- st_buffer(route, dist = 0.1)
+  route_proj <- st_transform(route, 32632) # Using UTM zone for Europe
+  buffer_proj <- st_buffer(route_proj, dist = 5000) # 5 km buffer in meters
+  buffer <- st_transform(buffer_proj, 4326)
   buffers_list[[dest_id]] <- buffer
   
-  # Grid points within buffer
-  bbox <- st_bbox(buffer)
-  x_seq <- seq(bbox$xmin, bbox$xmax, by = 0.1)
-  y_seq <- seq(bbox$ymin, bbox$ymax, by = 0.1)
-  grid_points <- expand.grid(x = x_seq, y = y_seq) %>%
-    st_as_sf(coords = c("x", "y"), crs = 4326)
-  grid_points <- grid_points[st_within(grid_points, buffer, sparse = FALSE), ]
+  # --- Use projected CRS for grid, spacing in meters ---
+  bbox_proj <- st_bbox(buffer_proj)
+  x_seq <- seq(bbox_proj$xmin, bbox_proj$xmax, by = 20000)
+  y_seq <- seq(bbox_proj$ymin, bbox_proj$ymax, by = 20000)
+  grid_points_proj <- expand.grid(x = x_seq, y = y_seq) %>%
+    st_as_sf(coords = c("x", "y"), crs = st_crs(buffer_proj))
+  grid_points_proj <- grid_points_proj[st_within(grid_points_proj, buffer_proj, sparse = FALSE), ]
+  grid_points <- st_transform(grid_points_proj, 4326) # back to WGS84 for API
   
-  # --- Query chargers ---
+  # Storing grid points
   chargers_all <- list()
   for (j in 1:nrow(grid_points)) {
     coords <- st_coordinates(grid_points[j, ])
@@ -146,17 +162,17 @@ for (i in seq_along(routes_list)) {
     if (!is.null(chargers_df)) {
       chargers_all[[length(chargers_all) + 1]] <- chargers_df
     }
-    Sys.sleep(3)  # Pause between requests
+    Sys.sleep(3)  # Pausing between requests
   }
   
-  # Combine and deduplicate chargers
+  # Combining all chargers into one data frame
   if (length(chargers_all) > 0) {
     chargers_df_all <- bind_rows(chargers_all) %>%
       distinct(lon, lat, .keep_all = TRUE)
     
-    # --- Safe check: does 'suitable' column exist? ---
+    # Keeping only relevant columns
     if ("suitable" %in% colnames(chargers_df_all)) {
-      # Replace NAs with 0 (or FALSE)
+      # Replacing NAs with 0 (or FALSE)
       chargers_df_all$suitable[is.na(chargers_df_all$suitable)] <- 0
       chargers_df_all <- chargers_df_all[chargers_df_all$suitable == 1, , drop = FALSE]
     }
@@ -167,7 +183,7 @@ for (i in seq_along(routes_list)) {
   
   chargers_list[[dest_id]] <- chargers_df_all
   
-  # --- Query hospitality POIs ---
+  # Querying POIs within a small bounding box around each grid point
   pois_all <- list()
   for (j in 1:nrow(grid_points)) {
     coords <- st_coordinates(grid_points[j, ])
@@ -175,29 +191,34 @@ for (i in seq_along(routes_list)) {
     lat <- coords[2]
     small_bbox <- c(lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05)
     
-    q <- opq(bbox = small_bbox, timeout = 300) %>%
-      add_osm_features(features = list(
-        "amenity" = c("cafe", "restaurant", "fast_food", "toilets"),
-        "tourism" = c("attraction", "hotel", "hostel", "guest_house", "apartment")
-      )) %>%
-      osmdata_sf()
+    q <- tryCatch({
+      opq(bbox = small_bbox, timeout = 600) %>%
+        add_osm_features(features = list(
+          "amenity" = c("cafe", "restaurant", "fast_food", "toilets"),
+          "tourism" = c("attraction", "hotel", "hostel", "guest_house", "apartment")
+        )) %>%
+        osmdata_sf()
+    }, error = function(e) {
+      message(sprintf("Overpass query failed at lon %.4f, lat %.4f: %s", lon, lat, e$message))
+      NULL
+    })
     
     if (!is.null(q$osm_points) && nrow(q$osm_points) > 0) {
       pois_all[[length(pois_all) + 1]] <- q$osm_points
     }
     
-    Sys.sleep(3)
+    Sys.sleep(3)  # Pausing between requests
   }
   
-  # Combine POI results (if any)
+  # Combining all POIs into one data frame
   if (length(pois_all) > 0) {
-    # Convert to data frames
+    # Converting list of sf objects to data frames
     pois_all_df <- lapply(pois_all, function(x) as.data.frame(x))
     
-    # Combine safely
+    # Combining them safely
     pois_df_all <- dplyr::bind_rows(pois_all_df)
     
-    # Keep only the desired columns
+    # Keeping only the desired columns
     cols_exist <- c("tourism", "amenity") %in% colnames(pois_df_all)
     if (any(cols_exist)) {
       pois_df_all <- pois_df_all %>%
@@ -218,7 +239,7 @@ for (i in seq_along(routes_list)) {
   message("Finished processing for ", dest_id)
 }
 
-# ---- EDSI RAW VARIABLE CALCULATION LOOP ----
+# Calculating EDSI metrics
 edsi_df <- data.frame(
   destination = character(),
   charger_density = numeric(),
@@ -228,12 +249,13 @@ edsi_df <- data.frame(
   stringsAsFactors = FALSE
 )
 
+# Looping through each destination to calculate metrics
 for (dest_id in names(chargers_list)) {
   chargers <- chargers_list[[dest_id]]
   pois <- poi_list[[dest_id]]
   route <- routes_list[[dest_id]]
   
-  # Charger density per 100km
+  # Charger density (per 100 km of route)
   route_length <- sum(st_length(route)) / 1000  # in km
   if (!is.null(chargers) && as.numeric(route_length) > 0) {
     charger_density <- nrow(chargers) / (as.numeric(route_length) / 100)
@@ -241,15 +263,15 @@ for (dest_id in names(chargers_list)) {
     charger_density <- 0
   }
   
-  # % fast chargers
+  # Fast charger percentage
   fast_pct <- if (!is.null(chargers) && nrow(chargers) > 0) mean(chargers$fast, na.rm = TRUE) else 0
   
-  # Convert chargers to sf
+  # Converting chargers to sf if not already
   chargers_sf <- if (!is.null(chargers) && nrow(chargers) > 0)
     st_as_sf(chargers, coords = c("lon", "lat"), crs = 4326)
   else NULL
   
-  # Convert pois to sf if not already
+  # POI density (per 100 km of route)
   if (!inherits(pois, "sf") && !is.null(pois)) {
     if ("geometry" %in% names(pois)) {
       pois <- st_as_sf(pois)
@@ -258,15 +280,19 @@ for (dest_id in names(chargers_list)) {
     }
   }
   
-  # POI density near chargers (within 1 km)
+  # POI density (per 100 km of route)
   if (!is.null(pois) && nrow(pois) > 0 && !is.null(chargers_sf) && nrow(chargers_sf) > 0) {
+    # Ensuring both layers have the same CRS
+    if (st_crs(pois) != st_crs(chargers_sf)) {
+      pois <- st_transform(pois, st_crs(chargers_sf))
+    }
     pois_near <- st_join(chargers_sf, pois, join = st_is_within_distance, dist = 2000)
     poi_density <- nrow(na.omit(pois_near)) / nrow(chargers)
   } else {
     poi_density <- 0
   }
   
-  # Average inter-station distance
+  # Average interstation distance (in km)
   if (!is.null(chargers_sf) && nrow(chargers_sf) > 1) {
     dist_matrix <- st_distance(chargers_sf)
     avg_interstation <- mean(dist_matrix[lower.tri(dist_matrix)], na.rm = TRUE) / 1000  # km
@@ -274,6 +300,7 @@ for (dest_id in names(chargers_list)) {
     avg_interstation <- NA
   }
   
+  # Appending the metrics to the data frame
   edsi_df <- rbind(edsi_df, data.frame(
     destination = dest_id,
     charger_density = charger_density,
@@ -283,8 +310,7 @@ for (dest_id in names(chargers_list)) {
   ))
 }
 
-# --- Visualize buffer, grid points, chargers, and hospitality POIs ---
-# Combine all chargers into one sf object
+# Combining all buffers into one sf object
 all_chargers <- do.call(rbind, lapply(chargers_list, function(df) {
   if (!is.null(df)) {
     # Only keep rows with valid lon/lat
@@ -296,53 +322,45 @@ all_chargers <- do.call(rbind, lapply(chargers_list, function(df) {
   }
 }))
 
-# Combine all POIs into one sf object
+# Combining all buffers into one sf object
 all_pois <- do.call(rbind, lapply(poi_list, function(df) {
   if (!is.null(df)) {
-    # POIs from OSM already have geometry
+    # Only keeping rows with valid geometry
     st_as_sf(df, crs = 4326)
   } else {
     NULL
   }
 }))
 
-# "Food spots" = amenities (cafe, restaurant, fast_food)
-food_amenities <- all_pois %>%
+# --- RANN filtering: Only POIs within 5km (5000m) of any charger ---
+utm_crs <- 32632 # UTM zone for central Europe, adjust if you work elsewhere
+
+if (!is.null(all_chargers) && nrow(all_chargers) > 0 && !is.null(all_pois) && nrow(all_pois) > 0) {
+  all_chargers_utm <- st_transform(all_chargers, crs = utm_crs)
+  all_pois_utm <- st_transform(all_pois, crs = utm_crs)
+  chargers_coords <- st_coordinates(all_chargers_utm)
+  pois_coords <- st_coordinates(all_pois_utm)
+  nn <- RANN::nn2(data = chargers_coords, query = pois_coords, k = 1)
+  nearest_dist <- nn$nn.dists[, 1]
+  pois_within_5km_utm <- all_pois_utm[nearest_dist <= 5000, ]
+  pois_within_5km <- st_transform(pois_within_5km_utm, 4326)
+} else {
+  pois_within_5km <- all_pois[0, ] # empty
+}
+
+# --- After creating pois_within_5km (and before plotting/maps) ---
+
+food_amenities <- pois_within_5km %>%
   filter(!is.na(amenity) & amenity %in% c("cafe", "restaurant", "fast_food"))
 
-# "Toilets" = amenities (toilets)
-toilet_amenities <- all_pois %>%
+toilet_amenities <- pois_within_5km %>%
   filter(!is.na(amenity) & amenity == "toilets")
 
-# "Overnight stays" = tourism (hotel, hostel, apartment, guest house)
-tourism_pois <- all_pois %>%
+tourism_pois <- pois_within_5km %>%
   filter(!is.na(tourism))
 
-# Interactive map
-leaflet() %>%
-  addProviderTiles(providers$CartoDB.Positron) %>%
-  addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
-  addPolygons(data = do.call(rbind, buffers_list), fillColor = "lightblue", fillOpacity = 0.3, color = NA, group = "Buffer") %>%
-  addCircleMarkers(data = grid_points, color = "pink", radius = 3, group = "Grid Points") %>%
-  addCircleMarkers(data = all_chargers, color = "purple", radius = 5, group = "EV Chargers") %>%
-  addCircleMarkers(data = food_amenities, color = "orange", radius = 4, group = "Food Spots", label = ~amenity) %>% 
-  addCircleMarkers(data = toilet_amenities, color = "green", radius = 4, group = "Toilets", label = ~amenity) %>%
-  addCircleMarkers(data = tourism_pois, color = "red", radius = 4, group = "Overnight Stays", label = ~tourism) %>%
-  addLayersControl(
-    overlayGroups = c("Routes", "Buffer", "Grid Points", "EV Chargers", "Food Spots", "Toilets", "Overnight Stays"),
-    options = layersControlOptions(collapsed = FALSE)
-  ) %>%
-  addLegend(position = "bottomright",
-            colors = c("purple", "orange", "green", "red"),
-            labels = c("EV Chargers",
-                       "Food Spots",
-                       "Toilets",
-                       "Overnight stays"),
-            title = "Chargers & POI Types",
-            opacity = 1) %>%
-  addScaleBar(position = "bottomleft")
-
-# With topography
+# Visualizing the routes, buffers, grid points, chargers, and filtered POIs (within 5km of any charger)
+# Adding topographic layer and grid points, with filtered POIs (within 5km of any charger)
 leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron, group = "Positron") %>%
   addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
@@ -365,8 +383,11 @@ leaflet() %>%
             opacity = 1) %>%
   addScaleBar(position = "bottomleft")
 
+# Saving the plot as png
+ggsave("poi_distribution.png", width = 12, height = 8, dpi = 300)
+
 # Subplots
-# Create type-labeled sf objects
+# Converting POI data to sf objects with type labels
 ev_chargers_sf <- all_chargers %>%
   mutate(type = "EV Charger")
 
@@ -379,7 +400,7 @@ toilets_sf <- toilet_amenities %>%
 overnight_sf <- tourism_pois %>%
   mutate(type = "Overnight Stay")
 
-# Combine them all
+# Combining them all
 all_poi_long <- bind_rows(ev_chargers_sf, food_spots_sf, toilets_sf, overnight_sf)
 
 # Start point
@@ -388,10 +409,10 @@ start_sf$city <- "Aarhus"
 # Destination points already have IDs
 dest_sf$city <- dest_sf$id
 
-# Combine start and destinations
+# Combining start and destinations
 city_points <- bind_rows(start_sf, dest_sf)
 
-# Prepare the combined geometries for bounding box
+# Preparing the combined geometries for bounding box
 all_geom <- c(
   st_geometry(all_poi_long),
   st_geometry(do.call(rbind, routes_list)),
@@ -410,7 +431,9 @@ poi_colors <- c(
   "Overnight Stay" = "red"
 )
 
-# Collective plot
+# The following two plots may trigger a warning about using st_point_on_surface on lon/lat data. This is safe to ignore, as we are labeling points and not polygons on the map.
+
+# Plotting the routes and POIs with facets
 ggplot() +
   geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
   geom_sf(data = all_poi_long, aes(color = type), size = 1.5, alpha = 0.85, show.legend = FALSE) +
@@ -422,7 +445,7 @@ ggplot() +
     size = 3.5,
     fontface = "bold"
   ) +
-  facet_wrap(~type, ncol = 2) +  # Facet after adding countries
+  facet_wrap(~type, ncol = 2) +  # facet by POI type
   scale_color_manual(values = poi_colors, drop = FALSE) +
   coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
   labs(
@@ -440,7 +463,10 @@ ggplot() +
     panel.grid = element_blank()
   )
 
-# Plot POI density
+# Saving the plot as png
+ggsave("poi_distribution_faceted.png", width = 12, height = 8, dpi = 300)
+
+# Plotting the routes and POIs with hexbin for density visualization
 ggplot() +
   geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
   geom_hex(
@@ -454,7 +480,7 @@ ggplot() +
     direction = -1,
     name = "POI Count",
     limits = c(0, 50),  
-    oob = scales::squish     # squish values outside limits to edges
+    oob = scales::squish # handling outliers
   ) +
   geom_sf(data = city_points, color = "black", size = 3, shape = 21, fill = "yellow") +
   ggrepel::geom_text_repel(
@@ -483,9 +509,10 @@ ggplot() +
     panel.grid = element_blank()
   )
 
-# --- Normalization Functions ---
-# Linear min-max and quantile provided for flexibility
+# Saving the plot as png
+ggsave("poi_distribution_hexbin.png", width = 12, height = 8, dpi = 300)
 
+# Linear min-max normalization
 normalize <- function(x, epsilon = 0.01) {
   rng <- max(x, na.rm = TRUE) - min(x, na.rm = TRUE)
   if (rng == 0) rep(0.5, length(x))
@@ -495,42 +522,39 @@ normalize <- function(x, epsilon = 0.01) {
   }
 }
 
+# Quantile normalization function
 quantile_norm <- function(x) ecdf(x)(x)
 
-# --- Normalize Each Component (choose best per variable) ---
+# Normalizing the EDSI metrics
 edsi_df$charger_density_norm <- quantile_norm(edsi_df$charger_density)
 edsi_df$fast_charger_pct_norm <- quantile_norm(edsi_df$fast_charger_pct)
 edsi_df$poi_density_norm <- quantile_norm(edsi_df$poi_density)
 edsi_df$avg_interstation_norm <- quantile_norm(edsi_df$avg_interstation)
 edsi_df$avg_interstation_norm <- 1 - edsi_df$avg_interstation_norm
 
-# --- Calculate Subscores ---
-# Infrastructure: charger density, fast charger %, avg interstation distance (inverse)
+# Infrastructure: mean of charger density, fast charger percentage, and average interstation distance
 edsi_df$Infrastructure <- rowMeans(data.frame(
   edsi_df$charger_density_norm,
   edsi_df$fast_charger_pct_norm,
   edsi_df$avg_interstation_norm
 ), na.rm = TRUE)
 
-# Comfort: just POI density (or add more comfort features if available)
+# Comfort: poi density normalized
 edsi_df$Comfort <- edsi_df$poi_density_norm
 
-# Combined EDSI: mean of Infrastructure and Comfort
+# Calculating the EDSI as a weighted average of Infrastructure and Comfort
 edsi_df$EDSI <- rowMeans(data.frame(
   edsi_df$Infrastructure,
   edsi_df$Comfort
 ), na.rm = TRUE)
 
-# Weigh infrastructure higher than Comfort (60-40 split)
+# Alternatively, using a weighted average
 edsi_df$EDSI <- 0.6 * edsi_df$Infrastructure + 0.4 * edsi_df$Comfort
 
-# View the results
+# Viewing the results
 print(edsi_df)
 
-library(knitr)
-install.packages("kableExtra")
-library(kableExtra)
-
+# Displaying the EDSI metrics in a table
 kable(edsi_df, 
       caption = "Table: EDSI Metrics for Selected Destinations", 
       digits = 3, 
@@ -541,9 +565,11 @@ kable(edsi_df,
   column_spec(1, bold = TRUE)  # make 'destination' stand out
 
 library(tidyr)
+
+# Reshaping the EDSI data for plotting
 edsi_long <- pivot_longer(edsi_df, cols = c(EDSI, Infrastructure, Comfort), names_to = "Score", values_to = "Value")
 
-# EV Driving Suitability Index
+# Plotting the EDSI scores and subscores
 ggplot(edsi_long %>% filter(Score != "EDSI"), aes(x = destination, y = Value, fill = Score)) +
   geom_col(position = "dodge", color = "gray30", width = 0.7) +
   geom_text(aes(label = round(Value, 2)), position = position_dodge(width = 0.9), vjust = -0.5) +
@@ -554,7 +580,10 @@ ggplot(edsi_long %>% filter(Score != "EDSI"), aes(x = destination, y = Value, fi
     plot.title = element_text(hjust = 0.5, size = 20)
   )
 
-# Comfort & Infrastructure
+# Saving the plot as png
+ggsave("edsi_subscores.png", width = 12, height = 8, dpi = 300)
+
+# Plotting the overall EDSI scores
 ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
   geom_col(width = 0.7, color = "gray30") +
   geom_text(aes(label = round(EDSI, 2)), vjust = -0.5, size = 5, color = "black") +
@@ -575,52 +604,56 @@ ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
     legend.position = "none"
   )
 
-# Check where about stops would be necessary with a driving range of 490 km
+# Saving the plot as png
+ggsave("edsi_overall.png", width = 12, height = 8, dpi = 300)
+
+# Function to get stops every 480 km along the route
 get_stops_every_480km <- function(route_sf, dist_km = 490) {
-  # Project route to a suitable projected CRS (UTM zone)
-  # Find UTM zone from the centroid longitude
+  # Checking if the route is valid and finding the UTM zone
   centroid <- st_centroid(route_sf)
   lon <- st_coordinates(centroid)[1]
   utm_zone <- floor((lon + 180) / 6) + 1
-  utm_crs <- paste0("EPSG:", 32600 + utm_zone)  # Northern Hemisphere assumed
+  utm_crs <- paste0("EPSG:", 32600 + utm_zone) # UTM zone for northern hemisphere
   
-  # Transform route to UTM
+  # Transforming the route to UTM CRS
   route_proj <- st_transform(route_sf, crs = utm_crs)
   
-  # Route length in meters (projected CRS units)
+  # Calculating the length of the route in meters
   route_length_m <- as.numeric(st_length(route_proj))
   
   # Number of stops
   n_stops <- floor(route_length_m / (dist_km * 1000))
   if(n_stops == 0) return(NULL)  # Route shorter than 480 km
   
-  # Distances along route to place stops (meters)
+  # Generating distances for stops
   stop_dists_m <- seq(from = dist_km * 1000, to = n_stops * dist_km * 1000, by = dist_km * 1000)
   
-  # Sample points at these distances
+  # Sampling points along the route at specified distances
   stop_points_proj <- st_line_sample(route_proj, sample = stop_dists_m / route_length_m)
   
-  # Convert MULTIPOINT to POINTS sf
+  # Converting sampled points to sf object
   stops_proj_sf <- st_sf(
     geometry = st_cast(stop_points_proj, "POINT"),
     dist_km = stop_dists_m / 1000
   )
   
-  # Transform stops back to WGS84
+  # Transforming back to WGS84
   stops_wgs84 <- st_transform(stops_proj_sf, crs = 4326)
   
   return(stops_wgs84)
 }
 
+# Getting stops every 490 km for each route
 stops_list <- lapply(routes_list, get_stops_every_480km, dist_km = 490)
 
-# Combine all stops into one sf object, adding destination name
+# Combining all stops into one sf object with destination names
 stops_all <- do.call(rbind, lapply(names(stops_list), function(dest) {
   sf_obj <- stops_list[[dest]]
   sf_obj$destination <- dest
   sf_obj
 }))
 
+# Visualizing the routes, chargers, stops, and topography
 leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
@@ -641,3 +674,6 @@ leaflet() %>%
             title = "Range with necessary charging breaks",
             opacity = 1) %>%
   addScaleBar(position = "bottomleft")
+
+# Saving the stops map as png
+ggsave("stops_map.png", width = 12, height = 8, dpi = 300)
