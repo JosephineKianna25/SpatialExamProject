@@ -5,6 +5,7 @@ library(httr)
 library(jsonlite)
 library(leaflet)
 library(dplyr)
+library(tidyr)
 library(sf)
 library(ggplot2)
 library(osmdata)
@@ -15,6 +16,7 @@ library(ggrepel)
 library(knitr)
 library(kableExtra)
 library(RANN)
+library(htmlwidgets)
 
 options(timeout = 600)  # Increase HTTP timeout (seconds)
 set_overpass_url("https://overpass-api.de/api/interpreter")
@@ -361,7 +363,7 @@ tourism_pois <- pois_within_5km %>%
 
 # Visualizing the routes, buffers, grid points, chargers, and filtered POIs (within 5km of any charger)
 # Adding topographic layer and grid points, with filtered POIs (within 5km of any charger)
-leaflet() %>%
+interactive_map <- leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron, group = "Positron") %>%
   addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
@@ -383,8 +385,8 @@ leaflet() %>%
             opacity = 1) %>%
   addScaleBar(position = "bottomleft")
 
-# Saving the plot as png
-ggsave("poi_distribution.png", width = 12, height = 8, dpi = 300)
+# Save to HTML
+saveWidget(interactive_map, file = "chargers&pois.html", selfcontained = TRUE)
 
 # Subplots
 # Converting POI data to sf objects with type labels
@@ -464,7 +466,7 @@ ggplot() +
   )
 
 # Saving the plot as png
-ggsave("poi_distribution_faceted.png", width = 12, height = 8, dpi = 300)
+ggsave("poi_distribution_faceted.png", width = 15, height = 8, dpi = 300)
 
 # Plotting the routes and POIs with hexbin for density visualization
 ggplot() +
@@ -510,7 +512,7 @@ ggplot() +
   )
 
 # Saving the plot as png
-ggsave("poi_distribution_hexbin.png", width = 12, height = 8, dpi = 300)
+ggsave("poi_distribution_hexbin.png", width = 15, height = 8, dpi = 300)
 
 # Linear min-max normalization
 normalize <- function(x, epsilon = 0.01) {
@@ -555,7 +557,7 @@ edsi_df$EDSI <- 0.6 * edsi_df$Infrastructure + 0.4 * edsi_df$Comfort
 print(edsi_df)
 
 # Displaying the EDSI metrics in a table
-kable(edsi_df, 
+edsi_table <- kable(edsi_df, 
       caption = "Table: EDSI Metrics for Selected Destinations", 
       digits = 3, 
       format = "html") %>%
@@ -564,7 +566,8 @@ kable(edsi_df,
   row_spec(0, bold = TRUE, background = "#f7f7f7") %>%
   column_spec(1, bold = TRUE)  # make 'destination' stand out
 
-library(tidyr)
+# Save to HTML file
+save_kable(edsi_table, "edsi_metrics_table.html")
 
 # Reshaping the EDSI data for plotting
 edsi_long <- pivot_longer(edsi_df, cols = c(EDSI, Infrastructure, Comfort), names_to = "Score", values_to = "Value")
@@ -581,7 +584,7 @@ ggplot(edsi_long %>% filter(Score != "EDSI"), aes(x = destination, y = Value, fi
   )
 
 # Saving the plot as png
-ggsave("edsi_subscores.png", width = 12, height = 8, dpi = 300)
+ggsave("edsi_subscores.png", width = 15, height = 8, dpi = 300)
 
 # Plotting the overall EDSI scores
 ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
@@ -605,7 +608,7 @@ ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
   )
 
 # Saving the plot as png
-ggsave("edsi_overall.png", width = 12, height = 8, dpi = 300)
+ggsave("edsi_overall.png", width = 15, height = 8, dpi = 300)
 
 # Function to get stops every 480 km along the route
 get_stops_every_480km <- function(route_sf, dist_km = 490) {
@@ -654,7 +657,7 @@ stops_all <- do.call(rbind, lapply(names(stops_list), function(dest) {
 }))
 
 # Visualizing the routes, chargers, stops, and topography
-leaflet() %>%
+charger_stops <- leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>%
   addProviderTiles(providers$OpenTopoMap, group = "Topography", options = providerTileOptions(opacity = 0.5)) %>%  # Topographic/hillshade
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
@@ -675,5 +678,5 @@ leaflet() %>%
             opacity = 1) %>%
   addScaleBar(position = "bottomleft")
 
-# Saving the stops map as png
-ggsave("stops_map.png", width = 12, height = 8, dpi = 300)
+# Saving the stops map as html
+saveWidget(charger_stops, file = "stops_per_490km.html", selfcontained = TRUE)
