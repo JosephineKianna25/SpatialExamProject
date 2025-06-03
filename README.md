@@ -11,9 +11,13 @@ easiest, most time-saving and/or consumer-friendly.
 ## Content and Repository Structure
 All necessary files to reproduce the analysis are included in this repository. 
 
-The main script is `Hospitality_map_&_EDSI.R` and should be run from start to finish. 
+The script `Boundingbox.R` outputs a plot of major cities within reach of 2000 km south of Aarhus from which we chose our destinations.
+
+The main script is `EDSI.R` and should be run from start to finish. This outputs various visualizations of the distribution of EV chargers and hospitality points of interest within a buffer along the routes. It also calculates metrics for travel feasibilty based on chosen infrastructure and comfort features.
 
 Data is loaded directly in the script and results are also generated in the script. 
+
+The outputs are saved in the repository in the format of png files for ggplots including the bounding box, Electric driving suitability index bar plot, infrastructure and comfort subscore bar plot, POI distribution and POI density plot. The html files include interactive maps of the POI's and suitable driving range stops, as well as a table for the EDSI metrics.
 
 ## Usage and Technical Requirements
 To reproduce the results, we advise you to clone the repository.
