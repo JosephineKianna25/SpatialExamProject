@@ -11,7 +11,7 @@ easiest, most time-saving and/or consumer-friendly.
 ## Content and Repository Structure
 All necessary files to reproduce the analysis are included in this repository. 
 
-The script `Boundingbox.R` outputs a plot of major cities within reach of 2000 km south of Aarhus from which we chose our destinations.
+The script `Boundingbox.R` outputs a plot of major cities within a 2000 km reach south of Aarhus. We chose our four destinations based on this plot.
 
 The main script is `EDSI.R` and should be run from start to finish. This outputs various visualizations of the distribution of EV chargers and hospitality points of interest within a buffer along the routes. It also calculates metrics for travel feasibilty based on chosen infrastructure and comfort features.
 
