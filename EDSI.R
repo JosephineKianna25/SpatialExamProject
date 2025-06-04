@@ -164,7 +164,7 @@ for (i in seq_along(routes_list)) {
     if (!is.null(chargers_df)) {
       chargers_all[[length(chargers_all) + 1]] <- chargers_df
     }
-    Sys.sleep(3)  # Pausing between requests
+    Sys.sleep(3)  # Pausing between requests to avoid API rate limiting
   }
   
   # Combining all chargers into one data frame
@@ -174,7 +174,7 @@ for (i in seq_along(routes_list)) {
     
     # Keeping only relevant columns
     if ("suitable" %in% colnames(chargers_df_all)) {
-      # Replacing NAs with 0 (or FALSE)
+      # Replacing NA's with 0 (or FALSE)
       chargers_df_all$suitable[is.na(chargers_df_all$suitable)] <- 0
       chargers_df_all <- chargers_df_all[chargers_df_all$suitable == 1, , drop = FALSE]
     }
@@ -185,7 +185,7 @@ for (i in seq_along(routes_list)) {
   
   chargers_list[[dest_id]] <- chargers_df_all
   
-  # Querying POIs within a small bounding box around each grid point
+  # Querying POI's within a small bounding box around each grid point
   pois_all <- list()
   for (j in 1:nrow(grid_points)) {
     coords <- st_coordinates(grid_points[j, ])
@@ -212,7 +212,7 @@ for (i in seq_along(routes_list)) {
     Sys.sleep(3)  # Pausing between requests
   }
   
-  # Combining all POIs into one data frame
+  # Combining all POI's into one data frame
   if (length(pois_all) > 0) {
     # Converting list of sf objects to data frames
     pois_all_df <- lapply(pois_all, function(x) as.data.frame(x))
@@ -334,10 +334,10 @@ all_pois <- do.call(rbind, lapply(poi_list, function(df) {
   }
 }))
 
-# Transforming chargers and POIs to UTM for distance calculations
+# Transforming chargers and POI's to UTM for distance calculations
 utm_crs <- 32632
 
-# If both chargers and POIs are available, we calculate nearest POIs within 5 km of any charger
+# If both chargers and POI's are available, we calculate nearest POI's within 5 km of any charger
 if (!is.null(all_chargers) && nrow(all_chargers) > 0 && !is.null(all_pois) && nrow(all_pois) > 0) {
   all_chargers_utm <- st_transform(all_chargers, crs = utm_crs)
   all_pois_utm <- st_transform(all_pois, crs = utm_crs)
@@ -351,7 +351,7 @@ if (!is.null(all_chargers) && nrow(all_chargers) > 0 && !is.null(all_pois) && nr
   pois_within_5km <- all_pois[0, ]
 }
 
-# Filtering POIs for specific amenities and tourism types
+# Filtering POI's for specific amenities and tourism types
 food_amenities <- pois_within_5km %>%
   filter(!is.na(amenity) & amenity %in% c("cafe", "restaurant", "fast_food"))
 
@@ -361,7 +361,7 @@ toilet_amenities <- pois_within_5km %>%
 tourism_pois <- pois_within_5km %>%
   filter(!is.na(tourism))
 
-# Visualizing the routes, buffers, grid points, chargers, and filtered POIs (within 5km of any charger)
+# Visualizing the routes, buffers, grid points, chargers, and filtered POI's (within 5km of any charger)
 interactive_map <- leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron, group = "Positron") %>%
   addPolylines(data = do.call(rbind, routes_list), color = "blue", weight = 3, opacity = 0.8, group = "Routes") %>%
@@ -433,7 +433,7 @@ poi_colors <- c(
 
 # The following two plots may trigger a warning about using st_point_on_surface on lon/lat data. This is safe to ignore, as we are labeling points and not polygons on the map.
 
-# Plotting the routes and POIs with facets
+# Plotting the routes and POI's with facets
 ggplot() +
   geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
   geom_sf(data = all_poi_long, aes(color = type), size = 1.5, alpha = 0.85, show.legend = FALSE) +
@@ -548,7 +548,7 @@ edsi_df$EDSI <- rowMeans(data.frame(
   edsi_df$Comfort
 ), na.rm = TRUE)
 
-# Alternatively, using a weighted average
+# Using a weighted average to value infrastructure over comfort
 edsi_df$EDSI <- 0.6 * edsi_df$Infrastructure + 0.4 * edsi_df$Comfort
 
 # Viewing the results
@@ -608,7 +608,7 @@ ggplot(edsi_df, aes(x = destination, y = EDSI, fill = destination)) +
 # Saving the plot as png
 ggsave("edsi_overall.png", width = 15, height = 8, dpi = 300)
 
-# Function to get stops every 480 km along the route
+# Function to get stops every 490 km along the route
 get_stops_every_480km <- function(route_sf, dist_km = 490) {
   # Checking if the route is valid and finding the UTM zone
   centroid <- st_centroid(route_sf)
