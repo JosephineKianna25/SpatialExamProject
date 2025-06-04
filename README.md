@@ -26,7 +26,7 @@ To reproduce the results, we advise you to clone the repository.
 
 ``$ git clone https://github.com/JosephineKianna25/SpatialExamProject.git``
 
-2. Open the script Hospitality_map_&_EDSI.R in RStudio and run it from top to bottom. 
+2. Open the script EDSI.R in RStudio and run it from top to bottom. 
 
 You will need R installed with the required libraries. A list of necessary packages is included in the top of the script. 
 
