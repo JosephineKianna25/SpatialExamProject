@@ -466,7 +466,7 @@ ggplot() +
 # Saving the plot as png
 ggsave("poi_distribution_faceted.png", width = 15, height = 8, dpi = 300)
 
-# Plotting the routes and POIs with hexbin for density visualization
+# Plotting the routes and POI's with hexbin for density visualization
 ggplot() +
   geom_sf(data = do.call(rbind, routes_list), color = "blue", size = 1, alpha = 0.7) +
   geom_hex(
@@ -624,7 +624,7 @@ get_stops_every_480km <- function(route_sf, dist_km = 490) {
   
   # Number of stops
   n_stops <- floor(route_length_m / (dist_km * 1000))
-  if(n_stops == 0) return(NULL)  # Route shorter than 480 km
+  if(n_stops == 0) return(NULL)  # Route shorter than 490 km
   
   # Generating distances for stops
   stop_dists_m <- seq(from = dist_km * 1000, to = n_stops * dist_km * 1000, by = dist_km * 1000)
