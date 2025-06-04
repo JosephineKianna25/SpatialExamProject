@@ -147,4 +147,4 @@ ggplot() +
     plot.title = element_text(face = "bold", size = 20, hjust = 0.5)
   )
 
-ggsave("bbox_destinations.png", width = 10, height = 6, dpi = 300)
+ggsave("bbox_destinations.png", width = 15, height = 6, dpi = 300)

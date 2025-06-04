@@ -288,7 +288,7 @@ for (dest_id in names(chargers_list)) {
     if (st_crs(pois) != st_crs(chargers_sf)) {
       pois <- st_transform(pois, st_crs(chargers_sf))
     }
-    pois_near <- st_join(chargers_sf, pois, join = st_is_within_distance, dist = 2000)
+    pois_near <- st_join(chargers_sf, pois, join = st_is_within_distance, dist = 5000)
     poi_density <- nrow(na.omit(pois_near)) / nrow(chargers)
   } else {
     poi_density <- 0
@@ -449,7 +449,7 @@ ggplot() +
   scale_color_manual(values = poi_colors, drop = FALSE) +
   coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
   labs(
-    title = "Density and Distribution of POI Types Along EV Travel Routes",
+    title = "Distribution of POI Types Along EV Travel Routes",
     subtitle = "Each facet shows one POI category",
     caption = "Data: OpenStreetMap, OpenChargeMap"
   ) +
@@ -493,7 +493,7 @@ ggplot() +
   facet_wrap(~type, ncol = 2) +
   coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
   labs(
-    title = "Density and Distribution of POI Types Along EV Travel Routes",
+    title = "Density of POI Types Along EV Travel Routes",
     subtitle = "Each facet shows one POI category",
     caption = "Data: OpenStreetMap, OpenChargeMap",
     x = NULL,
@@ -677,3 +677,4 @@ charger_stops <- leaflet() %>%
 
 # Saving the stops map as html
 saveWidget(charger_stops, file = "stops_per_490km.html", selfcontained = TRUE)
+
